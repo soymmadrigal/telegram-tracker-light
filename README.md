@@ -1,290 +1,399 @@
+# Telegram Tracker Light App
 
-# **telegram-tracker-light**: `a Python-based open-source tool for Telegram`(fork de Telegram-tracker)
+Aplicacion local para descargar, actualizar, buscar y analizar mensajes de canales de Telegram usando la API oficial de Telegram y Telethon.
 
-------------------------------------------------------------------------
+Este proyecto es una adaptacion de:
 
-[![GitHub forks](https://img.shields.io/github/forks/estebanpdl/telegram-tracker.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/estebanpdl/telegram-tracker/network/) [![GitHub stars](https://img.shields.io/github/stars/estebanpdl/telegram-tracker?style=social)](https://github.com/estebanpdl/telegram-tracker/stargazers) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/estebanpdl/telegram-tracker/blob/main/LICENCE) [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://twitter.com/estebanpdl) [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/) [![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
+- [congosto/telegram-tracker-light](https://github.com/congosto/telegram-tracker-light), de Mari Luz Congosto: [https://github.com/congosto](https://github.com/congosto)
+- [estebanpdl/telegram-tracker](https://github.com/estebanpdl/telegram-tracker), de Esteban Ponce de Leon: [https://github.com/estebanpdl](https://github.com/estebanpdl)
 
-------------------------------------------------------------------------
-:::
+La adaptacion empaqueta el flujo en una app local con interfaz grafica, incorpora busqueda por terminos, deteccion de indicadores de pago, generacion de dashboards/graficos y descubrimiento de canales similares.
 
-## Overview
+## Que permite hacer
 
-### About this version of Telegram-tracker
+- Configurar credenciales de Telegram sin editar archivos a mano.
+- Descargar mensajes de un canal.
+- Crear datasets a partir de listas de canales.
+- Actualizar canales ya descargados evitando duplicados.
+- Buscar mensajes por terminos en un canal o en una lista de canales.
+- Generar graficos y dashboards HTML.
+- Construir redes de forwards y redes de canales similares en formato GEXF/GraphML.
+- Detectar IOCs de metodos de pago: BTC, ETH/EVM, TRON/USDT, LTC, BCH, XMR, IBAN, PayPal y telefonos tipo Bizum con contexto de pago.
 
-**telegram-tracker** is an excellent implementation for extracting information from Telegram channels. However, it does not retain context of what has been downloaded, which makes it challenging to automatically update channels with the latest messages. The lack of context can lead to message repetitions if a channel is downloaded more than once.
+## Estructura del entregable
 
-This version of telegram-tracker aims to download messages from Telegram channels and keep them updated with new messages, **avoiding duplicates**. To achieve this, it **maintains context** for each download by recording the date and time, the most recent message, and the total number of downloaded messages. It also stores context for all downloaded channels and their related channels.
-
-Usually, a download can take many hours or even days. If the scripts are interrupted, following this procedure ensures a safer restart, preventing the storage of repeated messages.
-
-This version stores only the most relevant data directly in CSV. This dramatically reduces data storage by not storing JSON. It also reduces execution time by not having to convert JSON to CSV, which was a very time-consuming process.
-
-The directory structure is modified so that channels are in a common repository. Datasets are formed by joining a list of channels. If a channel in the list does not exist in the repository, it will be downloaded and if it exists, its latest posts will be updated. This avoids downloading a channel more than once, as happened in telegram-tracker. 
-
-### Changes introduced in this Telegram-tracker fork
-
--   **Corrections**:
-
-    -   Fix a warning about using a deprecated parameter
-    -   Fixed some download errors with exceptions
-
--   **Changes**
-
-    -   Store data directly in csv, selecting only the relevant data
-
-    -   Added a **download progress bar**. Some channels can have millions of messages and it was not known how much was left to download. This progress bar takes as the number of messages the number of the last published message (the message ids are consecutive numbers starting from 1). The channel may have deleted messages, the download percentage will rarely reach 100%, but it gives an idea of ​​the percentage of deleted messages
-
-    -   The file **related_channels.csv** with the names of the related channels has been added to the download directory
-
-    - The script **build-datasets.py** has been removed since the data is collected directly in csv. Instead, a **build_dataset.py** has been created which joins the channel data (in csv) into a dataset. If the channel does not exist in the repository, it will be downloaded. If it exists, it will be updated. 
-
-    -   The **--min-id parameter** has been removed as it is no longer necessary, given that updates with new messages are now automatic.
-
-    -   The **--batch-file** parameter has been removed to ensure that channels are downloaded one by one using **main.py**. When you want to download a list of channels, you can do so using:
-
-        -   A shell script **menu.py**
-        -   The **telegram-tracker.ipynb** notebook included in this repository, prepared to be used in **Google's Colab environment**
-
--   **Added context**:
-
-    -   The **context** directory has been created to store the different download logs
-    -   The **{channel}\_log_download.csv** file has been added to the **context** directory. For each download, the most recent message number, the number of downloaded messages, and the date and time of the download are stored. This allows automatic updating of new messages without having to use the **--min-id** parameter which has been removed.
-    -   For **snowball downloading**, context is saved in a file **{channel}\_n2_log.csv** with the operations carried out by the channels in order to resume the download at the point it left off after an interruption
-    -   To **download a list** of channels, context is saved in a file **{name_list}\_log.csv** with the operations carried out by the channels in order to resume the download at the point it left off after an interruption
-    -   In the **context** directory of the data, two files have been added:
-        -   **collected_channels_all.csv**: contains all the downloaded channels
-        -   **related_channel_all.csv**: includes all channels related to the downloaded channels. These channels may appear in multiple datasets, which is why we also store the number of times they appear in other downloads and the directories where they can be found.
-
--   **Limitations**: There are two types of channels:
-
-    -   **Broadcasts** that publish and do not allow comments. It only has one owner
-    -   **Chat channels** allow conversations and usually have several administrators
-
-    Chat channels can have millions of messages and downloading them requires a lot of time and storage. It is possible to limit the number of messages with the parameter **--max_msgs** and the most recent ones are obtained.
-
-This fork includes a notebook to run these scripts in the colab environment.
-
-Requirements:
-
--   Have a Google account
--   Have a Telegram account
--   Create an App in Telegram <https://my.telegram.org/auth?to=apps> and follow the steps to obtain the Id and API KEY
--   Fill the telegram-tracker configuration file (config/config.ini) with the App data
--   Upload the repository to drive
--   Open **telegram-tracker.ipynb** in the colab environment (clicking on the notebook will open it in the environment)
-
-The **telegram-tracker.ipynb** notebook will mount drive so that the scripts can be executed from there
-
-### Local enviroment
-
-This tool connects to Telegram's API. It generates csv files containing channel's data, including channel's information and posts. You can search for a specific channel, or a set of channels provided in a text file (one channel per line.)
-
-You can access it in command mode, but with the **menu.py** script you can download in a controlled way
-
--   A channel
-
--   Snowball from a channel
-
--   A group of channels
-
-**Software required**
-
--   [Python 3.x](https://www.python.org/)
--   [Telegram API credentials](https://my.telegram.org/auth?to=apps)
-    -   Telegram account
-    -   App `api_id`
-    -   App `api_hash`
-
-**Python required libraries**
-
--   [Telethon](https://docs.telethon.dev/en/stable/)
--   [Pandas](https://pandas.pydata.org/)
--   [Openpyxl](https://openpyxl.readthedocs.io/en/stable/)
--   [tqdm](https://tqdm.github.io/)
--   [Networkx](https://networkx.org/)
--   [Matplotlib](https://matplotlib.org/)
--   [Louvain Community Detection](https://github.com/taynaud/python-louvain)
-
-## Installing
-
--   **Via git clone**
-
-```         
-https://github.com/congosto/telegram-tracker-light.git
+```text
+telegram-tracker-light-app/
+  app.py
+  README.md
+  requirements.txt
+  config/
+    config.example.ini
+    config.ini              # generado por el usuario; no compartir con credenciales reales
+  scripts/
+    api/
+    utils/
+    main.py
+    setup.py
+    menu.py
+    build-dataset.py
+    search_messages.py
+    similar_channels.py
+    draw_charts.py
+    dashboard.py
+    filtrobtc.py
+    net.py
+    summary_channels.py
+    summary_datasets.py
+    update_channels.py
+    start_app.bat
 ```
 
-This will create a directory called `telegram-tracker` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
+Las carpetas `data/` y `dataset/` se crean automaticamente al configurar o usar la aplicacion.
 
--   **From the github download button**
+## Requisitos
 
-Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-tracker-t-hoarder_tg.zip` on your preferred location.
+- Windows, macOS o Linux.
+- Python 3.10 o superior recomendado.
+- Una cuenta de Telegram.
+- Credenciales `api_id` y `api_hash` de Telegram.
 
-**After cloning or downloding the repository, install the libraries from `requirements.txt`.**
+En Windows, durante la instalacion de Python, marca la casilla **Add Python to PATH**.
 
-```         
+## Instalacion rapida
+
+Abre una terminal en la carpeta del proyecto.
+
+En Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python app.py
+```
+
+Si PowerShell no permite activar el entorno por la politica de ejecucion, puedes usar:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+O ejecutar directamente:
+
+```powershell
+.\.venv\Scripts\python.exe app.py
+```
+
+En macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python app.py
+```
+
+## Obtener api_id y api_hash de Telegram
+
+Esta herramienta usa la API de usuario de Telegram, no un bot de BotFather. Necesitas `api_id` y `api_hash`, que se obtienen en el portal oficial de Telegram.
+
+Enlace oficial:
+
+[https://my.telegram.org/auth?to=apps](https://my.telegram.org/auth?to=apps)
+
+Segun la documentacion oficial de Telegram, para obtener un API ID debes iniciar sesion en `my.telegram.org`, entrar en **API development tools**, rellenar el formulario de aplicacion y copiar los parametros `api_id` y `api_hash`.
+
+Pasos detallados:
+
+1. Abre [https://my.telegram.org/auth?to=apps](https://my.telegram.org/auth?to=apps).
+2. Escribe tu numero de telefono con prefijo internacional, por ejemplo `+34123456789`.
+3. Telegram enviara un codigo de confirmacion a tu aplicacion de Telegram.
+4. Introduce el codigo en la web.
+5. Entra en **API development tools**.
+6. Si no tienes aplicacion creada, completa el formulario:
+   - `App title`: nombre descriptivo, por ejemplo `Telegram Tracker Local`.
+   - `Short name`: nombre corto, por ejemplo `trackerlocal`.
+   - `Platform`: Desktop o la opcion mas parecida a tu uso.
+   - `Description`: indica que es una herramienta local de analisis con la API de Telegram.
+7. Guarda el formulario.
+8. Copia:
+   - `api_id`
+   - `api_hash`
+9. Abre la app (`python app.py`) y pega esos datos en la pestana **Configuracion**.
+
+Representacion orientativa de la pagina:
+
+```text
+my.telegram.org
+┌────────────────────────────────────────────┐
+│ Your Telegram Core                         │
+│                                            │
+│  API development tools  ← entra aqui       │
+│  Delete account                            │
+│  Log out                                   │
+└────────────────────────────────────────────┘
+```
+
+Despues de crear la aplicacion veras algo similar a:
+
+```text
+App api_id:   1234567
+App api_hash: abcdef1234567890abcdef1234567890
+```
+
+Guarda esos valores solo en tu copia local. No publiques `config/config.ini`.
+
+## Primer arranque
+
+Ejecuta:
+
+```powershell
+python app.py
+```
+
+O en Windows, si prefieres un lanzador:
+
+```powershell
+.\scripts\start_app.bat
+```
+
+En la app:
+
+1. Abre la pestana **Configuracion**.
+2. Pulsa **Abrir pagina de Telegram** si aun no tienes credenciales.
+3. Introduce `api_id`, `api_hash` y telefono.
+4. Pulsa **Guardar configuracion**.
+5. Ve a **Captura** o **Buscar por termino**.
+
+La app guarda las credenciales en:
+
+```text
+config/config.ini
+```
+
+Tambien existe una plantilla sin secretos:
+
+```text
+config/config.example.ini
+```
+
+## Uso desde la app
+
+### Configuracion
+
+Permite guardar:
+
+- `api_id`
+- `api_hash`
+- telefono con prefijo internacional
+
+### Captura
+
+Opciones:
+
+- Descargar un canal.
+- Crear un dataset desde un archivo con una lista de canales.
+- Crear un dataset snowball usando los canales relacionados detectados al descargar un canal raiz.
+
+El archivo de lista debe contener un canal por linea:
+
+```text
+canaluno
+canaldos
+otrocanal
+```
+
+La opcion **Crear dataset snowball** parte de un canal ya descargado. Al descargar un canal, la herramienta genera:
+
+```text
+data/<canal>/related_channels.csv
+```
+
+Ese archivo se usa como lista de entrada para crear un nuevo dataset, por defecto:
+
+```text
+dataset/<canal>_n2/
+```
+
+Flujo recomendado:
+
+1. Descargar primero el canal raiz.
+2. Comprobar que existe `data/<canal>/related_channels.csv`.
+3. Usar **Crear dataset snowball**.
+4. Elegir nombre de dataset o dejar el valor por defecto `<canal>_n2`.
+
+### Buscar por termino
+
+Permite buscar mensajes en:
+
+- un canal unico,
+- una lista de canales.
+
+Los terminos pueden separarse con comas o con `OR`:
+
+```text
+bitcoin, paypal
+```
+
+```text
+"frase exacta" OR transferencia
+```
+
+Los resultados se guardan con la misma estructura de cabeceras que los datasets descargados por `main.py`.
+
+### Analisis
+
+Permite:
+
+- Generar graficos.
+- Generar dashboard HTML.
+- Buscar IOCs de pago.
+- Generar red GEXF de forwards.
+
+Los graficos se generan en formato 1920x1080, con paleta pastel y fuente Century Gothic si esta disponible en el sistema.
+
+### Canales similares
+
+Construye una red de recomendaciones de canales a partir de un canal semilla.
+
+Genera:
+
+```text
+similar_channels.csv
+channel_recommendations_edges.csv
+channel_recommendations_events.csv
+channel_recommendations.gexf
+channel_recommendations.graphml
+```
+
+Los archivos `.gexf` y `.graphml` pueden abrirse en Gephi u otras herramientas de analisis de redes.
+
+## Salidas generadas
+
+### Canal individual
+
+```text
+data/<canal>/
+  msgs_dataset.csv
+  collected_chats.csv
+  collected_chats_full.csv
+  related_channels.csv
+  counter.csv
+  context/
+```
+
+### Dataset
+
+```text
+dataset/<dataset>/
+  msgs_dataset.csv
+  collected_chats.csv
+  channel_list.csv
+  context/
+  images/
+  dashboard.html
+  payment_iocs.csv
+```
+
+## Uso por terminal
+
+La interfaz grafica es la forma recomendada, pero tambien pueden ejecutarse scripts directamente.
+
+Configurar credenciales:
+
+```powershell
+python scripts/setup.py
+```
+
+Descargar canal:
+
+```powershell
+python scripts/main.py --telegram-channel nombrecanal
+```
+
+Crear dataset desde lista:
+
+```powershell
+python scripts/build-dataset.py --dataset-name midataset --channel-list canales.txt
+```
+
+Crear dataset snowball desde un canal ya descargado:
+
+```powershell
+python scripts/build-dataset.py --dataset-name canalraiz_n2 --channel-list data/canalraiz/related_channels.csv
+```
+
+Buscar terminos en un canal:
+
+```powershell
+python scripts/search_messages.py --terms "bitcoin, paypal" --telegram-channel nombrecanal
+```
+
+Buscar terminos en una lista:
+
+```powershell
+python scripts/search_messages.py --terms "Rita OR Maestre" --dataset-name busqueda_rita --channel-list canales.txt
+```
+
+Detectar IOCs en un dataset:
+
+```powershell
+python scripts/filtrobtc.py --dataset midataset
+```
+
+Descubrir canales similares:
+
+```powershell
+python scripts/similar_channels.py --telegram-channel nombrecanal --profundidad 2 --dataset-name nombrecanal_similar
+```
+
+## Seguridad y privacidad
+
+- No compartas `config/config.ini`.
+- No compartas archivos `.session`.
+- No subas datasets con mensajes privados o sensibles sin revisar su contenido.
+- Esta herramienta usa una cuenta de Telegram real, por lo que debes respetar los terminos de uso de Telegram y la legislacion aplicable.
+- Evita lanzar descargas masivas sin necesidad: algunos canales pueden tener millones de mensajes y la API puede aplicar esperas por rate limit.
+
+## Solucion de problemas
+
+### `ModuleNotFoundError`
+
+Instala dependencias:
+
+```powershell
 pip install -r requirements.txt
 ```
 
-or
+### Telegram pide codigo en el primer uso
 
-```         
-pip3 install -r requirements.txt
+Es normal. Telethon pedira el codigo que Telegram envia a tu aplicacion. Tras iniciar sesion se crea una sesion local para no repetir el login constantemente.
+
+### `api_id` debe ser numerico
+
+El `api_id` no es el `api_hash`. El primero es un numero; el segundo es una cadena larga.
+
+### No aparecen graficos
+
+Comprueba que existe:
+
+```text
+dataset/<dataset>/msgs_dataset.csv
 ```
 
-**Once you obtain an API ID and API hash on my.telegram.org, populate the `config/config.ini` file with the described values.**
+o:
 
-``` ini
-
-[Telegram API credentials]
-api_id = api_id
-api_hash = api_hash
-phone = phone
+```text
+data/<canal>/msgs_dataset.csv
 ```
 
-*Note: Your phone must be included to authenticate for the first time. Use the format +\<code\>\<number\> (e.g., +19876543210). Telegram API will send you a code via Telegram app that you will need to include.*
+### Problemas con WordCloud o NLTK
 
-<br />
+La primera ejecucion puede descargar recursos de stopwords de NLTK. Si no hay conexion, ejecuta la generacion de graficos cuando haya acceso a internet.
 
-------------------------------------------------------------------------
+## Notas de credito
 
-# Example usage by commands
-
-## `main.py`
-
-This Python script will connect to Telegram's API and handle your API request.
-
-### Options
-
--   `--telegram-channel` Specifies Telegram Channel to download data from.
--   `--limit-download-to-channel-metadata` Will collect channels metadata only, not channel's messages. (default = False)
--   `--output, -o` Specifies a folder to save collected data. If not given, script will generate a default folder called `./output/data`
-
-<br />
-
-### Structure of output data
-
-```         
-├──🗂 data
-||       └──🗂 context
-|           └──<channel>_log.csv
-|           └──related_channel_log.csv
-|           └──collected_channel_log.csv
-|       └──chats.txt // TM channels, groups, or users' IDs found in data.
-|       └──collected_chats.csv // TM channels or groups found in data (e.g., forwards)
-|       └──counter.csv // TM channels, groups or users found in data (e.g., forwards)
-|       └──user_exceptions.txt // From collected_chats, these are mostly TM users' which 
-|                                   metadata was not possible to retrieve via the API
-|       └──msgs_dataset.csv // Posts and messages from the requested channels
-|──🗂 dataset
-|       └──🗂 context
-|           └──<dataset>_log.csv
-|       └──collected_chats.csv // TM channels or groups found in data (e.g., forwards)
-|       └──msgs_dataset.csv // Posts and messages from the requested channels
-```
-
-<br />
-
-## **Examples**
-
-<br />
-
-### **Basic request**
-
-```         
-python main.py --telegram-channel channelname`
-```
-
-**Expected output**
-
--   Files of collected channels:
-    -   chats.txt
-    -   collected_chats.csv
-    -   user_exceptions.txt
-    -   counter.csv
-    -   collected_chanels
-
-<br />
-
-### **Request using a text file containing a set of channels**
-
-Download the channels one by one with the same output directory
-
-```         
-for chanel in channels:
-   python main.py  --telegram-channel channel --output './path/to/channels'
-```
-
-**Expected output**
-
--   Files of collected channels:
-    -   chats.txt
-    -   collected_chats.csv
-    -   user_exceptions.txt
-    -   counter.csv
-    -   collected_chanels
-
-These examples will retrieve all posts available through the API from the requested channel. If you want to collect channel's information only, without posts, you can run:
-
-<br />
-
-### **Limit download to channel's metadata only**
-
-```         
-python main.py --telegram-channel channelname --limit-download-to-channel-metadata
-```
-
-<br />
-
-### **Updating channel's data**
-
-It is automatic because it has context
-
-```         
-python main.py --telegram-channel channelname --output './path/to/channels'
-```
-
-**Expected output**
-
--   Files of collected channels:
-    -   chats.txt
-    -   collected_chats.csv
-    -   user_exceptions.txt
-    -   counter.csv
-    -   collected_chanels
-
-<br />
-
-### **Specify output folder**
-
-The script allows you to specify a specific output directory to save collected data. The sxcript will create those folders in case do not exist.
-
-```         
-python main.py --telegram-channel channelname --output ./path/to/chosen/directory`
-```
-
-The expected output is the same a described above but data will be save using the chosen directory.
-
-<br />
-
-------------------------------------------------------------------------
-
-## `channels-to-network.py`
-
-This Python script builds a network graph. By default, the file will be located in the `output` folder. The script also saves a preliminary graph: `network.png` using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can import the GEFX Graph File using different softwares, including Gephi.
-
-### Options
-
--   `--data-path` Path were data is located. Will use `./output/data` if not given.
-
-If a specific directory was not provided in `main.py`, run:
-
-```         
-python channels-to-network.py
-```
-
-If you provided a specific directory using the option `--output` in `main.py`, run:
-
-```         
-python channels-to-network.py --data-path ./path/to/chosen/directory
-```
+Este entregable mantiene la base conceptual y funcional de `telegram-tracker` y `telegram-tracker-light`: descarga con Telethon, datasets CSV, contexto de descarga, actualizacion incremental y analisis posterior. La capa de app local, busqueda por terminos, deteccion de IOCs, ordenacion de scripts y flujo de entrega se han anadido como adaptacion para uso guiado y demostraciones.
