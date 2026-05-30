@@ -521,7 +521,7 @@ def get_url_attrs(msg, res):
 		url = url.group()
 		domain = re.search(r'(?<=://)[^/]+', url)
 		if domain != None:
-			domain = re.sub ('^www\.|^WWW\.', "", domain.group())
+			domain = re.sub (r'^www\.|^WWW\.', "", domain.group())
 			domain = re.sub ('m.youtu.be|youtu.be|m.youtube.com', "youtube.com", domain)
 			domain = re.sub ('t.co', "twitter.com", domain)
 		has_url = 1

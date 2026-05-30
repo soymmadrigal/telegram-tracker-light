@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
 
+import getpass
+import sys
+import asyncio
+
 # import Telethon API modules
 from telethon import TelegramClient, types
+from telethon.errors import (
+	PhoneCodeExpiredError,
+	PhoneCodeInvalidError,
+	SessionPasswordNeededError,
+)
 from telethon.tl.functions.channels import GetChannelsRequest, \
 	GetFullChannelRequest, GetParticipantsRequest
 from telethon.tl.functions.messages import GetHistoryRequest, \
@@ -25,14 +34,46 @@ async def get_connection(session_file, api_id, api_hash, phone):
 	client = TelegramClient(session_file, api_id, api_hash)
 	await client.connect()
 	if await client.is_user_authorized():
-		print ('> Authorized!')
+		print ('> Authorized!', flush=True)
 	else:
-		print ('> Not Authorized! Sending code request...')
+		print ('> Not Authorized! Sending code request...', flush=True)
 		await client.send_code_request(phone)
-		await client.sign_in(
-			phone,
-			input('Enter the code: ')
-		)
+		for attempt in range(3):
+			print('> Enter the Telegram login code received in your Telegram app.', flush=True)
+			print('Code: ', end='', flush=True)
+			code = sys.stdin.readline().strip()
+			if not code:
+				print('> Empty code. Try again.', flush=True)
+				continue
+			try:
+				print('> Checking login code with Telegram...', flush=True)
+				await asyncio.wait_for(client.sign_in(phone, code), timeout=60)
+				print('> Authorized!', flush=True)
+				break
+			except PhoneCodeInvalidError:
+				print('> Invalid code. Check Telegram and try again.', flush=True)
+			except PhoneCodeExpiredError:
+				print('> Code expired. Run the command again to request a new code.', flush=True)
+				await client.disconnect()
+				sys.exit(1)
+			except SessionPasswordNeededError:
+				password = getpass.getpass('Two-step verification password: ')
+				print('> Checking two-step verification password...', flush=True)
+				await asyncio.wait_for(client.sign_in(password=password), timeout=60)
+				print('> Authorized!', flush=True)
+				break
+			except asyncio.TimeoutError:
+				print('> Telegram did not answer within 60 seconds. Try again in a moment.', flush=True)
+				await client.disconnect()
+				sys.exit(1)
+			except Exception as e:
+				print(f'> Authorization error: {type(e).__name__}: {e}', flush=True)
+				await client.disconnect()
+				sys.exit(1)
+		else:
+			print('> Authorization failed after 3 attempts.', flush=True)
+			await client.disconnect()
+			sys.exit(1)
 
 	return client
 

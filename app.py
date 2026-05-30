@@ -86,6 +86,15 @@ class TrackerApp(tk.Tk):
 		ttk.Button(toolbar, text="Detener", command=self._stop_process).pack(side=tk.RIGHT, padx=(0, 8))
 		self.console = tk.Text(console_frame, height=11, wrap="word", bg="#111827", fg="#e5e7eb", insertbackground="#e5e7eb")
 		self.console.grid(row=1, column=0, sticky="nsew")
+		input_bar = ttk.Frame(console_frame)
+		input_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+		input_bar.columnconfigure(1, weight=1)
+		ttk.Label(input_bar, text="Entrada a consola").grid(row=0, column=0, sticky="w", padx=(0, 8))
+		self.process_input_var = tk.StringVar()
+		self.process_input_entry = ttk.Entry(input_bar, textvariable=self.process_input_var)
+		self.process_input_entry.grid(row=0, column=1, sticky="ew")
+		self.process_input_entry.bind("<Return>", lambda event: self._send_process_input())
+		ttk.Button(input_bar, text="Enviar", command=self._send_process_input).grid(row=0, column=2, padx=(8, 0))
 		main.add(console_frame, weight=1)
 
 	def _card(self, parent, title, row, column, columnspan=1):
@@ -104,35 +113,80 @@ class TrackerApp(tk.Tk):
 		entry.grid(row=row, column=1, sticky="ew", pady=5, padx=(10, 0))
 		return entry
 
+	def _secret_entry(self, parent, label, variable, row):
+		ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=5)
+		entry = tk.Entry(
+			parent,
+			textvariable=variable,
+			show="*",
+			borderwidth=1,
+			relief="solid",
+			font=("Segoe UI", 10),
+			bg="#ffffff",
+			fg="#20242a",
+			insertbackground="#20242a",
+		)
+		entry.grid(row=row, column=1, sticky="ew", pady=5, padx=(10, 0), ipady=4)
+		return entry
+
 	def _build_setup_tab(self):
 		tab = ttk.Frame(self.tabs, padding=10)
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
+		tab.rowconfigure(0, weight=1)
 		self.tabs.add(tab, text="Configuracion")
 
-		card = self._card(tab, "Credenciales de Telegram", 0, 0, 2)
+		card = self._card(tab, "Credenciales de Telegram", 0, 0)
 		self.api_id_var = tk.StringVar()
 		self.api_hash_var = tk.StringVar()
 		self.phone_var = tk.StringVar()
-		self._entry(card, "api_id", self.api_id_var, 1)
-		self._entry(card, "api_hash", self.api_hash_var, 2, show="*")
-		self._entry(card, "Telefono", self.phone_var, 3)
+		self.show_credentials_var = tk.BooleanVar(value=False)
+		self.api_id_entry = self._secret_entry(card, "api_id", self.api_id_var, 1)
+		self.api_hash_entry = self._secret_entry(card, "api_hash", self.api_hash_var, 2)
+		self.phone_entry = self._secret_entry(card, "Telefono", self.phone_var, 3)
+		self.telegram_code_var = tk.StringVar()
+		self.telegram_code_entry = self._secret_entry(card, "Codigo Telegram (si lo solicita)", self.telegram_code_var, 4)
+		ttk.Button(card, text="Enviar codigo", command=self._send_telegram_code).grid(
+			row=4, column=2, sticky="ew", padx=(8, 0), pady=5
+		)
+		ttk.Checkbutton(
+			card,
+			text="Mostrar credenciales",
+			variable=self.show_credentials_var,
+			command=self._toggle_credentials_visibility,
+		).grid(row=5, column=1, sticky="w", padx=(10, 0), pady=(12, 0))
 		ttk.Button(card, text="Abrir pagina de Telegram", command=lambda: webbrowser.open(TELEGRAM_APPS_URL)).grid(
-			row=4, column=0, sticky="w", pady=(14, 0)
+			row=6, column=0, sticky="w", pady=(14, 0)
+		)
+		ttk.Button(card, text="Autorizar sesion", command=self._run_login).grid(
+			row=6, column=1, sticky="w", padx=(10, 0), pady=(14, 0)
 		)
 		ttk.Button(card, text="Guardar configuracion", command=self._save_config).grid(
-			row=4, column=1, sticky="e", pady=(14, 0)
+			row=6, column=2, sticky="e", pady=(14, 0)
 		)
 
-		help_card = self._card(tab, "Guia rapida", 1, 0, 2)
+		help_card = self._card(tab, "Como obtener api_id y api_hash", 0, 1)
 		steps = (
-			"1. Entra en https://my.telegram.org/auth?to=apps\n"
-			"2. Inicia sesion con tu cuenta de Telegram\n"
-			"3. Abre API development tools y crea una app\n"
-			"4. Copia api_id y api_hash aqui\n"
-			"5. Guarda y usa la pestana Captura"
+			"1. Pulsa Abrir pagina de Telegram.\n"
+			"2. Inicia sesion con tu telefono.\n"
+			"3. Entra en API development tools.\n"
+			"4. Crea una app si no existe.\n"
+			"5. Copia api_id y api_hash.\n"
+			"6. Guarda esta configuracion.\n\n"
+			"El telefono debe incluir prefijo internacional,\n"
+			"por ejemplo +34123456789.\n\n"
+			"No compartas config/config.ini."
 		)
-		ttk.Label(help_card, text=steps, style="Card.TLabel", justify="left").grid(row=1, column=0, sticky="w")
+		ttk.Label(help_card, text=steps, style="Card.TLabel", justify="left", wraplength=420).grid(
+			row=1, column=0, sticky="nw"
+		)
+		ttk.Label(
+			help_card,
+			text=TELEGRAM_APPS_URL,
+			style="Card.TLabel",
+			foreground="#255a8f",
+			wraplength=420,
+		).grid(row=2, column=0, sticky="nw", pady=(16, 0))
 
 	def _build_capture_tab(self):
 		tab = ttk.Frame(self.tabs, padding=10)
@@ -187,28 +241,23 @@ class TrackerApp(tk.Tk):
 
 		search_card = self._card(tab, "Buscar mensajes por terminos", 0, 0, 2)
 		self.search_terms_var = tk.StringVar()
-		self.search_channel_var = tk.StringVar()
 		self.search_dataset_var = tk.StringVar()
 		self.search_list_var = tk.StringVar()
-		self._entry(search_card, "Terminos", self.search_terms_var, 1)
-		self._entry(search_card, "Canal unico", self.search_channel_var, 2)
-		ttk.Button(search_card, text="Buscar canal", command=self._run_search_channel).grid(
-			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
-		)
-		self._entry(search_card, "Dataset", self.search_dataset_var, 3)
-		self._entry(search_card, "Lista de canales", self.search_list_var, 4)
+		self._entry(search_card, "Nombre del dataset", self.search_dataset_var, 1)
+		self._entry(search_card, "Terminos", self.search_terms_var, 2)
+		self._entry(search_card, "Lista de canales", self.search_list_var, 3)
 		ttk.Button(search_card, text="Elegir archivo", command=lambda: self._choose_file(self.search_list_var)).grid(
-			row=4, column=2, sticky="ew", padx=(8, 0), pady=5
-		)
-		ttk.Button(search_card, text="Buscar lista", command=self._run_search_list).grid(
 			row=3, column=2, sticky="ew", padx=(8, 0), pady=5
+		)
+		ttk.Button(search_card, text="Buscar", command=self._run_search).grid(
+			row=4, column=2, sticky="ew", padx=(8, 0), pady=(12, 0)
 		)
 
 		guide_card = self._card(tab, "Como escribir terminos", 1, 0, 2)
 		text = (
 			"Puedes separar terminos con comas o con OR.\n"
 			"Ejemplos: bitcoin, paypal  |  \"frase exacta\" OR transferencia\n"
-			"Los resultados se guardan con el mismo formato de msgs_dataset.csv."
+			"La busqueda se ejecuta en tiempo real sobre la lista de canales seleccionada."
 		)
 		ttk.Label(guide_card, text=text, style="Card.TLabel", justify="left").grid(row=1, column=0, sticky="w")
 
@@ -282,6 +331,13 @@ class TrackerApp(tk.Tk):
 		self.api_id_var.set(section.get("api_id", ""))
 		self.api_hash_var.set(section.get("api_hash", ""))
 		self.phone_var.set(section.get("phone", ""))
+		self.show_credentials_var.set(False)
+		self.after(0, self._toggle_credentials_visibility)
+
+	def _toggle_credentials_visibility(self):
+		show_char = "" if self.show_credentials_var.get() else "*"
+		for entry in (self.api_id_entry, self.api_hash_entry, self.phone_entry):
+			entry.configure(show=show_char)
 
 	def _save_config(self):
 		api_id = self.api_id_var.get().strip()
@@ -326,9 +382,11 @@ class TrackerApp(tk.Tk):
 				cwd=ROOT,
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
+				stdin=subprocess.PIPE,
 				text=True,
 				encoding="utf-8",
 				errors="replace",
+				creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
 			)
 			for line in self.running_process.stdout:
 				self.output_queue.put(line)
@@ -359,11 +417,46 @@ class TrackerApp(tk.Tk):
 	def _clear_console(self):
 		self.console.delete("1.0", tk.END)
 
+	def _send_process_input(self):
+		value = self.process_input_var.get()
+		self._send_value_to_process(value, clear_var=self.process_input_var)
+
+	def _send_telegram_code(self):
+		value = self.telegram_code_var.get().strip()
+		if not value:
+			messagebox.showinfo("Codigo vacio", "Introduce el codigo recibido en Telegram.")
+			return
+		self._send_value_to_process(value, clear_var=self.telegram_code_var)
+
+	def _send_value_to_process(self, value, clear_var=None):
+		if self.running_process is None or self.running_process.stdin is None:
+			messagebox.showinfo("Sin proceso", "No hay ningun proceso esperando entrada.")
+			return
+		try:
+			self.running_process.stdin.write(value + "\n")
+			self.running_process.stdin.flush()
+			self._append_console("[entrada enviada]\n")
+			if clear_var is not None:
+				clear_var.set("")
+		except Exception as exc:
+			messagebox.showerror("Entrada no enviada", str(exc))
+
 	def _stop_process(self):
 		if self.running_process is None:
 			return
-		self.running_process.terminate()
-		self._append_console("\n[Proceso detenido por el usuario]\n")
+		try:
+			if os.name == "nt":
+				subprocess.run(
+					["taskkill", "/PID", str(self.running_process.pid), "/T", "/F"],
+					stdout=subprocess.DEVNULL,
+					stderr=subprocess.DEVNULL,
+					check=False,
+				)
+			else:
+				self.running_process.terminate()
+			self._append_console("\n[Proceso detenido por el usuario]\n")
+		except Exception as exc:
+			messagebox.showerror("No se pudo detener", str(exc))
 
 	def _require(self, value, label):
 		value = value.strip()
@@ -381,6 +474,9 @@ class TrackerApp(tk.Tk):
 		if max_msgs:
 			args += ["--max-msgs", max_msgs]
 		self._run(args)
+
+	def _run_login(self):
+		self._run([sys.executable, self._script("login.py")])
 
 	def _run_build_dataset(self):
 		name = self._require(self.dataset_name_var.get(), "Dataset")
@@ -418,27 +514,22 @@ class TrackerApp(tk.Tk):
 			args += ["--max-msgs", max_msgs]
 		self._run(args)
 
-	def _run_search_channel(self):
+	def _run_search(self):
+		dataset_name = self._require(self.search_dataset_var.get(), "Nombre del dataset")
 		terms = self._require(self.search_terms_var.get(), "Terminos")
-		channel = self._require(self.search_channel_var.get(), "Canal unico")
-		if terms and channel:
-			self._run([sys.executable, self._script("search_messages.py"), "--terms", terms, "--telegram-channel", channel])
-
-	def _run_search_list(self):
-		terms = self._require(self.search_terms_var.get(), "Terminos")
-		name = self._require(self.search_dataset_var.get(), "Dataset")
 		channel_list = self._require(self.search_list_var.get(), "Lista de canales")
-		if terms and name and channel_list:
-			self._run([
-				sys.executable,
-				self._script("search_messages.py"),
-				"--terms",
-				terms,
-				"--dataset-name",
-				name,
-				"--channel-list",
-				channel_list,
-			])
+		if not dataset_name or not terms or not channel_list:
+			return
+		self._run([
+			sys.executable,
+			self._script("search_messages.py"),
+			"--terms",
+			terms,
+			"--dataset-name",
+			dataset_name,
+			"--channel-list",
+			channel_list,
+		])
 
 	def _run_charts(self):
 		name = self._require(self.analysis_name_var.get(), "Canal o dataset")

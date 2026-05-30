@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote
 
 
-REQUIRED_COLS = {"username", "date", "message", "views", "msg_link", "links", "domains"}
+REQUIRED_COLS = {"date", "message", "views", "msg_link"}
 
 URL_RE = re.compile(r"https?://[^\s\])>\"']+", re.IGNORECASE)
 MARKDOWN_RE = re.compile(r"[*_`#\[\]()]+")
@@ -77,15 +77,15 @@ def load_rows(path: Path):
 def normalise_row(row):
     row = {key: repair_text(value) for key, value in row.items()}
     msg = row.get("message") or ""
-    links = extract_links(row.get("links") or "", msg)
-    domains = extract_domains(row.get("domains") or "", links)
+    links = extract_links(row.get("links") or row.get("url") or "", msg)
+    domains = extract_domains(row.get("domains") or row.get("domain") or "", links)
     dt = parse_date(row.get("date") or "")
     views = to_int(row.get("views"))
     forwards = to_int(row.get("number_forwards"))
     replies = to_int(row.get("number_replies"))
     title = make_title(msg, links)
     return {
-        "username": (row.get("username") or "").strip() or "(sin_username)",
+        "username": (row.get("username") or row.get("channel_name") or "").strip() or "(sin_canal)",
         "date": row.get("date") or "",
         "dt": dt,
         "month": dt.strftime("%Y-%m") if dt else "",
@@ -521,7 +521,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
         <h1>Dashboard {h(subject_display)}</h1>
         <p class="subtitle">Analisis exploratorio de mensajes de Telegram sobre {h(subject_display)}. Dataset: <strong>{h(dataset_name)}</strong>, periodo {h(date_min)} a {h(date_max)}.</p>
         <div class="actions">
-          <a class="button" href="{h(csv_data_uri)}" download="messages.csv">Descargar CSV original</a>
+          <a class="button" href="{h(csv_data_uri)}" download="{h(csv_path.name)}">Descargar CSV original</a>
           <a class="button secondary" href="#explorador">Explorar mensajes</a>
         </div>
       </div>
@@ -623,8 +623,9 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("dataset", nargs="?", help="Subcarpeta dentro de dataset/")
+    parser.add_argument("dataset", nargs="?", help="Nombre de dataset o canal")
     parser.add_argument("--base", default="dataset", help="Carpeta base (default: dataset)")
+    parser.add_argument("--channel", action="store_true", help="Buscar en data/<nombre> en lugar de dataset/<nombre>")
     parser.add_argument("--subject", default=None, help="Nombre visible del sujeto buscado (default: nombre del dataset)")
     parser.add_argument("--aliases", default="", help="Alias separados por comas para detectar el sujeto en el foco")
     parser.add_argument("--focus-label", default=None, help="Nombre de la seccion especial")
@@ -640,10 +641,16 @@ def main():
         print("ERROR: dataset vacio.")
         sys.exit(1)
 
-    dataset_dir = Path(args.base) / dataset_name
-    csv_path = dataset_dir / "messages.csv"
+    if args.channel:
+        dataset_dir = Path("data") / dataset_name
+    else:
+        dataset_dir = Path(args.base) / dataset_name
+        if not dataset_dir.exists() and (Path("data") / dataset_name).exists():
+            dataset_dir = Path("data") / dataset_name
+    csv_path = dataset_dir / "msgs_dataset.csv"
     if not csv_path.exists():
         print(f"ERROR: No existe {csv_path}.")
+        print("El dashboard espera un archivo msgs_dataset.csv generado por la aplicacion.")
         sys.exit(1)
 
     subject_display = args.subject or dataset_name.replace("_", " ").replace("-", " ").title()
