@@ -35,6 +35,7 @@ telegram-tracker-light-app/
     utils/
     main.py
     setup.py
+    login.py
     menu.py
     build-dataset.py
     search_messages.py
@@ -166,7 +167,9 @@ En la app:
 2. Pulsa **Abrir pagina de Telegram** si aun no tienes credenciales.
 3. Introduce `api_id`, `api_hash` y telefono.
 4. Pulsa **Guardar configuracion**.
-5. Ve a **Captura** o **Buscar por termino**.
+5. Pulsa **Autorizar sesion** la primera vez que uses la cuenta.
+6. Si Telegram solicita un codigo, escribelo en **Codigo Telegram (si lo solicita)** y pulsa **Enviar codigo**.
+7. Ve a **Captura** o **Buscar por termino**.
 
 La app guarda las credenciales en:
 
@@ -189,6 +192,8 @@ Permite guardar:
 - `api_id`
 - `api_hash`
 - telefono con prefijo internacional
+
+Tambien permite autorizar la sesion de Telegram. Si la consola indica que se ha enviado un codigo, usa el campo **Codigo Telegram (si lo solicita)**. La zona inferior **Entrada a consola** sirve para responder a cualquier otra pregunta interactiva del proceso en ejecucion.
 
 ### Captura
 
@@ -227,10 +232,13 @@ Flujo recomendado:
 
 ### Buscar por termino
 
-Permite buscar mensajes en:
+Permite buscar mensajes en tiempo real sobre una lista de canales.
 
-- un canal unico,
-- una lista de canales.
+Campos:
+
+- Nombre del dataset donde se guardaran los resultados.
+- Terminos de busqueda.
+- Lista de canales en archivo `.txt` o `.csv`, un canal por linea.
 
 Los terminos pueden separarse con comas o con `OR`:
 
@@ -242,7 +250,7 @@ bitcoin, paypal
 "frase exacta" OR transferencia
 ```
 
-Los resultados se guardan con la misma estructura de cabeceras que los datasets descargados por `main.py`.
+Los resultados se guardan en `dataset/<dataset>/msgs_dataset.csv`, con la misma estructura de cabeceras que los datasets descargados por `main.py`.
 
 ### Analisis
 
@@ -308,6 +316,12 @@ Configurar credenciales:
 python scripts/setup.py
 ```
 
+Autorizar sesion de Telegram:
+
+```powershell
+python scripts/login.py
+```
+
 Descargar canal:
 
 ```powershell
@@ -324,12 +338,6 @@ Crear dataset snowball desde un canal ya descargado:
 
 ```powershell
 python scripts/build-dataset.py --dataset-name canalraiz_n2 --channel-list data/canalraiz/related_channels.csv
-```
-
-Buscar terminos en un canal:
-
-```powershell
-python scripts/search_messages.py --terms "bitcoin, paypal" --telegram-channel nombrecanal
 ```
 
 Buscar terminos en una lista:
