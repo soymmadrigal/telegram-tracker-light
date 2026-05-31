@@ -42,6 +42,7 @@ TOPIC_PATTERNS = {
 }
 
 CHARTS = [
+    ("KPIs principales", "00_kpi_cards.png"),
     ("Timeline mensual", "01_mensajes_mes_timeline_global.png"),
     ("Timeline top canales", "01b_mensajes_mes_timeline_top_canales.png"),
     ("Mensajes por hora", "01c_mensajes_hora_global.png"),
@@ -50,6 +51,8 @@ CHARTS = [
     ("Top canales por vistas", "03_top10_vistas_canal.png"),
     ("Top dominios", "04_top10_dominios.png"),
     ("Nube de palabras", "05_wordcloud.png"),
+    ("Top forwards recibidos", "06_top10_forwards_recibidos.png"),
+    ("Top forwards realizados", "07_top10_forwards_realizados.png"),
 ]
 
 

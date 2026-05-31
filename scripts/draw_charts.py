@@ -32,11 +32,11 @@ graphics style
 # Graphics style
 CHART_FIGSIZE = (19.2, 10.8)
 CHART_DPI = 100
-PASTEL = ["#8ecae6", "#ffb5a7", "#b8e0d2", "#ffd166", "#cdb4db", "#a7c7e7", "#f4a261", "#bde0fe", "#caffbf", "#ffc8dd"]
+VIVID = ["#00B4D8", "#FF006E", "#8338EC", "#FB5607", "#3A86FF", "#06D6A0", "#FFBE0B", "#EF476F", "#118AB2", "#7209B7"]
 
 available_fonts = {font.name for font in font_manager.fontManager.ttflist}
 CHART_FONT = "Century Gothic" if "Century Gothic" in available_fonts else "DejaVu Sans"
-sns.set_theme(style="whitegrid", palette=PASTEL)
+sns.set_theme(style="whitegrid", palette=VIVID)
 plt.rcParams.update({
 	'font.size': 12,
 	'font.family': CHART_FONT,
@@ -46,15 +46,33 @@ plt.rcParams.update({
 	'axes.titlesize': 20,
 	'axes.labelsize': 14,
 })
-RED = '#ffb5a7'
-BLUE = '#8ecae6'
-COLOR_TEXT = "#5a5856"
+RED = '#FF006E'
+BLUE = '#00B4D8'
+COLOR_TEXT = "#1f2937"
 COLOR_GRID = "#d8dee8"
 
 def save_chart(output_path):
 	plt.tight_layout()
 	plt.savefig(output_path, dpi=CHART_DPI)
 	plt.close()
+
+def fmt_thousands(value):
+	return f"{int(value):,}".replace(",", ".")
+
+def annotate_vertical_bars(ax, values):
+	max_value = max(values) if len(values) else 0
+	offset = max(max_value * 0.015, 1)
+	for patch, value in zip(ax.patches, values):
+		ax.text(
+			patch.get_x() + patch.get_width() / 2,
+			patch.get_height() + offset,
+			fmt_thousands(value),
+			ha="center",
+			va="bottom",
+			fontsize=12,
+			fontweight="bold",
+			color=COLOR_TEXT,
+		)
 
 # Formatting function for numbers
 def si_formatter(x, pos):
@@ -149,7 +167,7 @@ def create_top_domains_barplot(ddf, title, output_path):
 
 	# Create bar chart
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
-	sns.barplot(data=top_15_domains, x='count', y='domain', palette=PASTEL, hue='domain', legend=False)
+	sns.barplot(data=top_15_domains, x='count', y='domain', palette=VIVID, hue='domain', legend=False)
 
 	plt.title(title, fontsize=16)
 	plt.xlabel('Total', fontsize=14)
@@ -185,10 +203,10 @@ def create_top_domains_timeline(ddf, title, output_path):
 	# Create cumulative count column
 	df_grouped['cumulative_count'] = df_grouped.groupby('domain')['count'].cumsum()
 	df_grouped= df_grouped.sort_values(by=['cumulative_count','domain'], ascending=[False, False])
-	color_lines = sns.color_palette(PASTEL)
+	color_lines = sns.color_palette(VIVID)
 	# Create the line chart
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
-	sns.lineplot(data=df_grouped, x='date', y='cumulative_count', hue='domain', palette=PASTEL, linewidth=2.0)
+	sns.lineplot(data=df_grouped, x='date', y='cumulative_count', hue='domain', palette=VIVID, linewidth=2.0)
 # Annotate top values
 	i_color = 0
 	texts = []
@@ -251,7 +269,7 @@ def create_wordcloud(ddf, column, output_path):
 		height=1080,
 		background_color='white',
 		stopwords=stop_words,
-		colormap='Pastel1',
+		colormap='turbo',
 		font_path=font_path,
 	).generate_from_frequencies(counts_all)
 
@@ -267,6 +285,83 @@ def create_wordcloud(ddf, column, output_path):
 	print(f'Last {datetime.now()- start_time_chart}')
 
 	return top_5_words
+
+def create_kpi_cards(ddf, title, output_path):
+	start_time_chart = datetime.now()
+	print("----> KPI cards...")
+	df = ddf[['channel_name', 'views', 'number_forwards']].compute()
+	df['views'] = pd.to_numeric(df['views'], errors='coerce').fillna(0)
+	df['number_forwards'] = pd.to_numeric(df['number_forwards'], errors='coerce').fillna(0)
+	kpis = [
+		("Mensajes", len(df), VIVID[0]),
+		("Canales", df['channel_name'].fillna("(sin_canal)").nunique(), VIVID[2]),
+		("Vistas", df['views'].sum(), VIVID[5]),
+		("Forwards", df['number_forwards'].sum(), VIVID[1]),
+	]
+	fig, ax = plt.subplots(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
+	fig.patch.set_facecolor("#f7f9fc")
+	ax.set_facecolor("#f7f9fc")
+	ax.axis("off")
+	ax.text(0.05, 0.88, title, transform=ax.transAxes, fontsize=30, fontweight="bold", color="#111827")
+	ax.text(0.05, 0.82, "Resumen ejecutivo del dataset", transform=ax.transAxes, fontsize=15, color="#4b5563")
+	card_w = 0.205
+	card_h = 0.42
+	xs = [0.05, 0.285, 0.52, 0.755]
+	for x, (label, value, color) in zip(xs, kpis):
+		card = plt.Rectangle((x, 0.28), card_w, card_h, transform=ax.transAxes, facecolor="white", edgecolor="#e5e7eb", linewidth=1.2)
+		ax.add_patch(card)
+		ax.add_patch(plt.Rectangle((x, 0.28 + card_h - 0.035), card_w, 0.035, transform=ax.transAxes, facecolor=color, edgecolor=color))
+		ax.text(x + 0.025, 0.58, label.upper(), transform=ax.transAxes, fontsize=13, fontweight="bold", color="#4b5563")
+		ax.text(x + 0.025, 0.43, fmt_thousands(value), transform=ax.transAxes, fontsize=34, fontweight="bold", color=color)
+	save_chart(output_path)
+	print(f'Successfully saved in {output_path}.')
+	print(f'Last {datetime.now()- start_time_chart}')
+
+def create_top_forward_received(ddf, title, output_path):
+	start_time_chart = datetime.now()
+	print("----> Top 10 channels by forwards received...")
+	df = ddf[['channel_name', 'number_forwards']].compute()
+	df['channel_name'] = df['channel_name'].fillna("(sin_canal)").astype(str)
+	df['number_forwards'] = pd.to_numeric(df['number_forwards'], errors='coerce').fillna(0)
+	top = df.groupby('channel_name', as_index=False)['number_forwards'].sum().nlargest(10, 'number_forwards')
+	if len(top) == 0 or top['number_forwards'].sum() == 0:
+		print('There are no received forwards to plot.')
+		return
+	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
+	ax = sns.barplot(data=top, x='channel_name', y='number_forwards', palette=VIVID, hue='channel_name', legend=False)
+	annotate_vertical_bars(ax, top['number_forwards'].tolist())
+	ax.set_title(title, fontsize=22, fontweight="bold")
+	ax.set_xlabel("")
+	ax.set_ylabel("Forwards recibidos")
+	ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: fmt_thousands(x)))
+	plt.xticks(rotation=35, ha='right')
+	ax.margins(y=0.15)
+	save_chart(output_path)
+	print(f'Successfully saved in {output_path}.')
+	print(f'Last {datetime.now()- start_time_chart}')
+
+def create_top_forward_makers(ddf, title, output_path):
+	start_time_chart = datetime.now()
+	print("----> Top 10 channels by forwards made...")
+	df = ddf[['channel_name', 'is_forward']].compute()
+	df['channel_name'] = df['channel_name'].fillna("(sin_canal)").astype(str)
+	df['is_forward'] = pd.to_numeric(df['is_forward'], errors='coerce').fillna(0)
+	top = df.groupby('channel_name', as_index=False)['is_forward'].sum().nlargest(10, 'is_forward')
+	if len(top) == 0 or top['is_forward'].sum() == 0:
+		print('There are no sent forwards to plot.')
+		return
+	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
+	ax = sns.barplot(data=top, x='channel_name', y='is_forward', palette=VIVID, hue='channel_name', legend=False)
+	annotate_vertical_bars(ax, top['is_forward'].tolist())
+	ax.set_title(title, fontsize=22, fontweight="bold")
+	ax.set_xlabel("")
+	ax.set_ylabel("Forwards realizados")
+	ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: fmt_thousands(x)))
+	plt.xticks(rotation=35, ha='right')
+	ax.margins(y=0.15)
+	save_chart(output_path)
+	print(f'Successfully saved in {output_path}.')
+	print(f'Last {datetime.now()- start_time_chart}')
 
 '''
 
@@ -339,6 +434,23 @@ ddf['date'] = dd.to_datetime(ddf['date'], errors='coerce')
 # Filter rows with valid dates
 ddf = ddf.dropna(subset=['date'])
 
+
+'''
+
+Creating KPI and forwards ranking charts
+
+'''
+create_kpi_cards(ddf,
+	f'{dataset}: KPIs principales',
+	f'{base_images_path}/00_kpi_cards.png')
+
+create_top_forward_received(ddf,
+	f'{dataset}: Top 10 canales que mas forwards reciben',
+	f'{base_images_path}/06_top10_forwards_recibidos.png')
+
+create_top_forward_makers(ddf,
+	f'{dataset}: Top 10 canales que mas forwards hacen',
+	f'{base_images_path}/07_top10_forwards_realizados.png')
 
 
 '''
