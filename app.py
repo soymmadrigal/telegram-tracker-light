@@ -269,13 +269,16 @@ class TrackerApp(tk.Tk):
 
 		charts_card = self._card(tab, "Graficos y dashboard", 0, 0)
 		self.analysis_name_var = tk.StringVar()
-		self._entry(charts_card, "Canal o dataset", self.analysis_name_var, 1)
+		self.analysis_mode_var = tk.StringVar(value="dataset")
+		self._entry(charts_card, "Nombre", self.analysis_name_var, 1)
 		ttk.Button(charts_card, text="Graficos", command=self._run_charts).grid(
 			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
 		)
 		ttk.Button(charts_card, text="Dashboard", command=self._run_dashboard).grid(
 			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
 		)
+		ttk.Radiobutton(charts_card, text="Dataset", variable=self.analysis_mode_var, value="dataset").grid(row=2, column=0, sticky="w")
+		ttk.Radiobutton(charts_card, text="Canal", variable=self.analysis_mode_var, value="channel").grid(row=2, column=1, sticky="w")
 
 		ioc_card = self._card(tab, "IOCs de metodos de pago", 0, 1)
 		self.ioc_name_var = tk.StringVar()
@@ -283,6 +286,9 @@ class TrackerApp(tk.Tk):
 		self._entry(ioc_card, "Nombre", self.ioc_name_var, 1)
 		ttk.Button(ioc_card, text="Buscar IOCs", command=self._run_iocs).grid(
 			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		)
+		ttk.Button(ioc_card, text="Detectar temas", command=self._run_theme_detection).grid(
+			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
 		)
 		ttk.Radiobutton(ioc_card, text="Dataset", variable=self.ioc_mode_var, value="dataset").grid(row=2, column=0, sticky="w")
 		ttk.Radiobutton(ioc_card, text="Canal", variable=self.ioc_mode_var, value="channel").grid(row=2, column=1, sticky="w")
@@ -532,17 +538,21 @@ class TrackerApp(tk.Tk):
 		])
 
 	def _run_charts(self):
-		name = self._require(self.analysis_name_var.get(), "Canal o dataset")
+		name = self._require(self.analysis_name_var.get(), "Nombre")
 		if not name:
 			return
-		if (ROOT / "data" / name).exists():
+		if self.analysis_mode_var.get() == "channel":
 			self._run([sys.executable, self._script("draw_charts.py"), "--channel", name])
 		else:
 			self._run([sys.executable, self._script("draw_charts.py"), "--dataset", name])
 
 	def _run_dashboard(self):
-		name = self._require(self.analysis_name_var.get(), "Canal o dataset")
-		if name:
+		name = self._require(self.analysis_name_var.get(), "Nombre")
+		if not name:
+			return
+		if self.analysis_mode_var.get() == "channel":
+			self._run([sys.executable, self._script("dashboard.py"), name, "--channel"])
+		else:
 			self._run([sys.executable, self._script("dashboard.py"), name])
 
 	def _run_iocs(self):
@@ -551,6 +561,13 @@ class TrackerApp(tk.Tk):
 			return
 		flag = "--dataset" if self.ioc_mode_var.get() == "dataset" else "--channel"
 		self._run([sys.executable, self._script("filtrobtc.py"), flag, name])
+
+	def _run_theme_detection(self):
+		name = self._require(self.ioc_name_var.get(), "Nombre")
+		if not name:
+			return
+		flag = "--dataset" if self.ioc_mode_var.get() == "dataset" else "--channel"
+		self._run([sys.executable, self._script("detect_themes.py"), flag, name])
 
 	def _run_net(self):
 		name = self._require(self.net_dataset_var.get(), "Dataset")
