@@ -80,7 +80,10 @@ def check_channel (root):
 			row = df.loc[df['username'].str.lower() == channel.lower()]
 			if len(row) == 1:
 				row.reset_index(drop=True, inplace=True)
-				channel_id = int(row.loc[0,'id'])
+				try:
+					channel_id = int(float(row.loc[0,'id']))
+				except (TypeError, ValueError):
+					channel_id = None
 	return channel_id
 
 # Create new folders

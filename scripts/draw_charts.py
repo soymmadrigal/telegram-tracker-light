@@ -4,6 +4,7 @@ This script is based on one made by Marcelino Madrigal
 import re
 import os
 import sys
+import warnings
 import nltk
 import pandas as pd
 import dask.dataframe as dd
@@ -21,7 +22,7 @@ from collections import Counter
 from datetime import datetime
 from nltk.corpus import stopwords
 from utils import (
-	chats_dataset_dtypes,msgs_dataset_dtypes
+	chats_dataset_dtypes,msgs_dataset_columns,msgs_dataset_dtypes
 )
 # Get start time
 '''
@@ -51,6 +52,27 @@ BLUE = '#00B4D8'
 COLOR_TEXT = "#1f2937"
 COLOR_GRID = "#d8dee8"
 
+warnings.filterwarnings("ignore", message="Could not infer format.*", category=UserWarning)
+warnings.filterwarnings("ignore", message="The palette list has.*", category=UserWarning)
+
+EXTRA_STOPWORDS = {
+	"a", "al", "algo", "algun", "alguna", "algunas", "alguno", "algunos", "ante",
+	"asi", "aun", "aunque", "bajo", "bien", "cada", "casi", "como", "con", "contra",
+	"cual", "cuando", "de", "del", "desde", "donde", "dos", "e", "el", "ella",
+	"ellas", "ello", "ellos", "en", "entre", "era", "eran", "eres", "es", "esa",
+	"esas", "ese", "eso", "esos", "esta", "estan", "estar", "estas", "este",
+	"esto", "estos", "fue", "han", "hasta", "hay", "he", "la", "las", "le", "les",
+	"lo", "los", "mas", "me", "mi", "mis", "muy", "no", "nos", "o", "os", "otra",
+	"otras", "otro", "otros", "para", "pero", "por", "porque", "que", "se", "sea",
+	"ser", "si", "sin", "sobre", "son", "su", "sus", "tambien", "tan", "te",
+	"tener", "ti", "tiene", "tienen", "todo", "todos", "tras", "tu", "tus", "un",
+	"una", "unas", "uno", "unos", "va", "van", "ya", "y",
+	"rt", "via", "https", "http", "www", "com", "org", "net", "t", "me", "telegram",
+	"canal", "grupo", "mensaje", "mensajes", "video", "foto", "audio", "link"
+}
+
+TOKEN_RE = re.compile(r"\b[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]{2,}\b")
+
 def save_chart(output_path):
 	plt.tight_layout()
 	plt.savefig(output_path, dpi=CHART_DPI)
@@ -73,6 +95,9 @@ def annotate_vertical_bars(ax, values):
 			fontweight="bold",
 			color=COLOR_TEXT,
 		)
+
+def chart_palette(size):
+	return [VIVID[i % len(VIVID)] for i in range(max(size, 1))]
 
 # Formatting function for numbers
 def si_formatter(x, pos):
@@ -113,7 +138,6 @@ def create_timeline_lineplot(ddf, attribute_a, attribute_b, filter_b, title, tit
 	if max_value == 0:
 		print(f'There are no {attribute_b}')
 		return
-	print(df_a.nlargest(10, 'is_forward'))
 	# create line chart
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
 	ax1 = sns.lineplot(data=df_a, x='date', y=attribute_a, color=BLUE, linewidth=1.5)
@@ -167,7 +191,7 @@ def create_top_domains_barplot(ddf, title, output_path):
 
 	# Create bar chart
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
-	sns.barplot(data=top_15_domains, x='count', y='domain', palette=VIVID, hue='domain', legend=False)
+	sns.barplot(data=top_15_domains, x='count', y='domain', palette=chart_palette(len(top_15_domains)), hue='domain', legend=False)
 
 	plt.title(title, fontsize=16)
 	plt.xlabel('Total', fontsize=14)
@@ -227,7 +251,7 @@ def create_top_domains_timeline(ddf, title, output_path):
 	plt.legend('',frameon=False)
 
 	save_chart(output_path)
-	print('Successfully saved in {output_path}.')
+	print(f'Successfully saved in {output_path}.')
 	print(f'Last {datetime.now()- start_time_chart} ')
 
 '''
@@ -238,7 +262,20 @@ Clean text
 def clean_text(text):
 		text = re.sub(r'http\S+', '', text)	# Eliminar URLs
 		text = text.lower()	# Pasar a minúsculas
+		text = re.sub(r'@\w+', ' ', text)
 		return text
+
+def wordcloud_tokens(text, stop_words):
+	for token in TOKEN_RE.findall(str(text)):
+		is_sigla = token.isupper() and 2 <= len(token) <= 6
+		word = token.lower()
+		if word in stop_words:
+			continue
+		if len(word) <= 2 and not is_sigla:
+			continue
+		if word.isdigit():
+			continue
+		yield word
 '''
 
 Create a word cloud
@@ -253,11 +290,13 @@ def create_wordcloud(ddf, column, output_path):
 	#Get a random sample of 10% of the messages
 	sample_ddf = ddf[column].dropna().sample(frac=0.1, random_state=1).compute().astype(str)
 	counts_all = Counter()
-	stop_words = set(stopwords.words('spanish') + stopwords.words('english'))
+	stop_words = set(stopwords.words('spanish') + stopwords.words('english')) | EXTRA_STOPWORDS
 	for line in sample_ddf:
-		counts_line = WordCloud(stopwords=stop_words).process_text(line)
-		counts_all.update(counts_line)
+		counts_all.update(wordcloud_tokens(line, stop_words))
 		# Generate word cloud
+	if not counts_all:
+		print('There are no words to plot.')
+		return []
 	font_path = None
 	if CHART_FONT == "Century Gothic":
 		for font in font_manager.fontManager.ttflist:
@@ -289,14 +328,19 @@ def create_wordcloud(ddf, column, output_path):
 def create_kpi_cards(ddf, title, output_path):
 	start_time_chart = datetime.now()
 	print("----> KPI cards...")
-	df = ddf[['channel_name', 'views', 'number_forwards']].compute()
+	df = ddf[['channel_name', 'views', 'number_forwards', 'is_forward']].compute()
 	df['views'] = pd.to_numeric(df['views'], errors='coerce').fillna(0)
 	df['number_forwards'] = pd.to_numeric(df['number_forwards'], errors='coerce').fillna(0)
+	df['is_forward'] = pd.to_numeric(df['is_forward'], errors='coerce').fillna(0)
+	total_number_forwards = df['number_forwards'].sum()
+	total_forwarded_messages = df['is_forward'].sum()
+	forwards_value = total_number_forwards if total_number_forwards > 0 else total_forwarded_messages
+	forwards_label = "Forwards" if total_number_forwards > 0 else "Reenviados"
 	kpis = [
 		("Mensajes", len(df), VIVID[0]),
 		("Canales", df['channel_name'].fillna("(sin_canal)").nunique(), VIVID[2]),
 		("Vistas", df['views'].sum(), VIVID[5]),
-		("Forwards", df['number_forwards'].sum(), VIVID[1]),
+		(forwards_label, forwards_value, VIVID[1]),
 	]
 	fig, ax = plt.subplots(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
 	fig.patch.set_facecolor("#f7f9fc")
@@ -328,7 +372,7 @@ def create_top_forward_received(ddf, title, output_path):
 		print('There are no received forwards to plot.')
 		return
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
-	ax = sns.barplot(data=top, x='channel_name', y='number_forwards', palette=VIVID, hue='channel_name', legend=False)
+	ax = sns.barplot(data=top, x='channel_name', y='number_forwards', palette=chart_palette(len(top)), hue='channel_name', legend=False)
 	annotate_vertical_bars(ax, top['number_forwards'].tolist())
 	ax.set_title(title, fontsize=22, fontweight="bold")
 	ax.set_xlabel("")
@@ -351,7 +395,7 @@ def create_top_forward_makers(ddf, title, output_path):
 		print('There are no sent forwards to plot.')
 		return
 	plt.figure(figsize=CHART_FIGSIZE, dpi=CHART_DPI)
-	ax = sns.barplot(data=top, x='channel_name', y='is_forward', palette=VIVID, hue='channel_name', legend=False)
+	ax = sns.barplot(data=top, x='channel_name', y='is_forward', palette=chart_palette(len(top)), hue='channel_name', legend=False)
 	annotate_vertical_bars(ax, top['is_forward'].tolist())
 	ax.set_title(title, fontsize=22, fontweight="bold")
 	ax.set_xlabel("")
@@ -373,8 +417,8 @@ Start script
 start_time = datetime.now()
 print(f"Script start time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-# Download NLTK stopwords
-nltk.download('stopwords')
+# Download NLTK stopwords if needed, without noisy console output.
+nltk.download('stopwords', quiet=True)
 
 '''
 
@@ -427,10 +471,18 @@ read and clean data
 '''
 # Read CSV file using dask with specified data types
 print("----> Reading CSV file...")
-ddf = dd.read_csv(csv_file_path, dtype=msgs_dataset_dtypes(), on_bad_lines='skip', engine='python')
+ddf = dd.read_csv(
+	csv_file_path,
+	dtype={column: 'object' for column in msgs_dataset_columns()},
+	on_bad_lines='skip',
+	engine='python'
+)
 print(f'Last {datetime.now()- start_time} ')
 # Convert 'date' column to datetime
 ddf['date'] = dd.to_datetime(ddf['date'], errors='coerce')
+for numeric_column in ['views', 'number_replies', 'number_forwards', 'is_forward', 'is_reply']:
+	if numeric_column in ddf.columns:
+		ddf[numeric_column] = dd.to_numeric(ddf[numeric_column], errors='coerce').fillna(0)
 # Filter rows with valid dates
 ddf = ddf.dropna(subset=['date'])
 
@@ -445,11 +497,11 @@ create_kpi_cards(ddf,
 	f'{base_images_path}/00_kpi_cards.png')
 
 create_top_forward_received(ddf,
-	f'{dataset}: Top 10 canales que mas forwards reciben',
+	f'{dataset}: Top 10 canales que más forwards reciben',
 	f'{base_images_path}/06_top10_forwards_recibidos.png')
 
 create_top_forward_makers(ddf,
-	f'{dataset}: Top 10 canales que mas forwards hacen',
+	f'{dataset}: Top 10 canales que más forwards hacen',
 	f'{base_images_path}/07_top10_forwards_realizados.png')
 
 

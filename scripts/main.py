@@ -14,6 +14,7 @@ import logging
 # import submodules
 from datetime import datetime
 from tqdm import tqdm
+from telethon import errors
 # import Telegram API submodules
 from api import *
 from utils import (
@@ -132,6 +133,13 @@ output = args['output']
 output_folder= f'{output}/{channel}'
 # create dirs
 channel_id = create_dirs(output_folder) # If channel exists, returns its ID
+import_source_file = os.path.join(output_folder, 'context', 'import_source.txt')
+json_imported_channel = False
+if os.path.exists(import_source_file):
+	with open(import_source_file, 'r', encoding='utf-8', errors='replace') as file:
+		json_imported_channel = 'telegram_desktop_json' in file.read()
+if json_imported_channel:
+	print('> JSON import detected. Resolving channel by username for API update.')
 exceptions_path = os.path.join(output_folder,'_exceptions-channels.txt')
 logging.basicConfig(filename= exceptions_path, level=logging.ERROR) 
 
@@ -173,21 +181,25 @@ print ('> ...')
 print ('')
 
 channel_request = None
+channel_api_source = None
 while True:
 	try:
-		if  channel_id == None:
-			entity_attrs = loop.run_until_complete(
-				get_entity_attrs	(client, channel)
-				)
-			#Get Channel ID | convert output to dict
-			if  entity_attrs:
-				channel_id = entity_attrs.id
-			else:
-				logging.error (f'{datetime.now()},Error,{channel}, ID not found')
-				break
+		entity_attrs = loop.run_until_complete(
+			get_entity_attrs(client, channel)
+		)
+		# Resolve by username/name first. A bare stored ID often lacks access_hash
+		# and Telethon may treat it as PeerUser instead of PeerChannel.
+		if entity_attrs:
+			channel_id = entity_attrs.id
+			channel_api_source = entity_attrs
+		elif channel_id is not None:
+			channel_api_source = channel_id
+		else:
+			logging.error (f'{datetime.now()},Error,{channel}, ID not found')
+			break
 		# Collect Source -> GetFullChannelRequest
 		channel_request = loop.run_until_complete(
-			full_channel_req(client, channel_id)
+			full_channel_req(client, channel_api_source)
 		)
 		print('Get entity attribs')
 		break
@@ -246,12 +258,12 @@ if channel_request != None:
 		if start_msg == 0: # changed by congosto
 			print('Downloading all messages')
 			posts = loop.run_until_complete(
-				get_posts(client, channel_id)
+				get_posts(client, channel_api_source)
 			)
 		else:
 			print(f'Downloading from msg {start_msg}')
 			posts = loop.run_until_complete(
-				get_posts(client, channel_id, min_id=min_id)
+				get_posts(client, channel_api_source, min_id=min_id)
 			)
 
 		data = posts.to_dict()
@@ -275,7 +287,7 @@ if channel_request != None:
 				posts = loop.run_until_complete(
 					get_posts(
 						client,
-						channel_id,
+						channel_api_source,
 						min_id=min_id,
 						offset_id=offset_id
 					)
@@ -284,7 +296,7 @@ if channel_request != None:
 				posts = loop.run_until_complete(
 					get_posts(
 						client,
-						channel_id,
+						channel_api_source,
 						offset_id=offset_id
 					)
 				)

@@ -43,17 +43,16 @@ TOPIC_PATTERNS = {
 
 CHARTS = [
     ("KPIs principales", "00_kpi_cards.png"),
-    ("Timeline mensual", "01_mensajes_mes_timeline_global.png"),
-    ("Timeline top canales", "01b_mensajes_mes_timeline_top_canales.png"),
-    ("Mensajes por hora", "01c_mensajes_hora_global.png"),
-    ("Pico de 5 minutos", "01d_pico_minuto_5m_global.png"),
-    ("Top canales por mensajes", "02_top10_mensajes_canal.png"),
-    ("Top canales por vistas", "03_top10_vistas_canal.png"),
-    ("Top dominios", "04_top10_dominios.png"),
-    ("Nube de palabras", "05_wordcloud.png"),
     ("Top forwards recibidos", "06_top10_forwards_recibidos.png"),
     ("Top forwards realizados", "07_top10_forwards_realizados.png"),
+    ("Timeline forwards", "timeline_forwards_send.png"),
+    ("Timeline respuestas", "timeline_replies_send.png"),
+    ("Top dominios", "top_15_domains.png"),
+    ("Timeline dominios", "top_10_domains_timeline.png"),
+    ("Nube de palabras", "wordcloud_messages.png"),
 ]
+
+EXPLORER_EMBED_LIMIT = 5000
 
 
 def sniff_delimiter(path: Path) -> str:
@@ -378,9 +377,12 @@ def topic_bars(stats):
 def chart_gallery(dataset_dir: Path):
     cards = []
     for title, filename in CHARTS:
-        chart_path = dataset_dir / filename
+        chart_path = dataset_dir / "images" / filename
+        src = f"images/{filename}"
+        if not chart_path.exists():
+            chart_path = dataset_dir / filename
+            src = filename
         if chart_path.exists():
-            src = image_data_uri(chart_path)
             cards.append(f"""
             <figure class="chart-card">
               <img src="{h(src)}" alt="{h(title)}">
@@ -414,10 +416,11 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
     top_domain, top_domain_count = stats["domain_counts"].most_common(1)[0] if stats["domain_counts"] else ("n/d", 0)
     imputacion_count = len(stats["imputacion"])
 
-    csv_data_uri = file_data_uri(csv_path, "text/csv")
     csv_size = csv_path.stat().st_size
 
     explorer_rows = sorted(rows, key=lambda r: r["dt"] or datetime.min, reverse=True)
+    explorer_total = len(explorer_rows)
+    explorer_embedded = explorer_rows[:EXPLORER_EMBED_LIMIT]
     explorer_json = json.dumps(
         [
             {
@@ -429,7 +432,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
                 "telegram": r["msg_link"],
                 "links": r["links"][:2],
             }
-            for r in explorer_rows
+            for r in explorer_embedded
         ],
         ensure_ascii=False,
     )
@@ -480,7 +483,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
     .three {{ grid-template-columns: 1fr 1fr 1fr; }}
     .section {{ margin-top: 22px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
-    td, th {{ padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
+    td, th {{ padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }}
     th {{ color: var(--muted); font-weight: 600; }}
     .bar-row {{ margin: 12px 0; }}
     .bar-label {{ display: flex; justify-content: space-between; gap: 12px; margin-bottom: 5px; font-size: 14px; }}
@@ -488,6 +491,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
     .bar-track div {{ height: 100%; border-radius: 999px; background: var(--accent); }}
     .message-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
     .message-card {{ padding: 15px; }}
+    .message-card, .domain-card, .chart-card {{ min-width: 0; overflow: hidden; }}
     .message-card p {{ color: #343a42; font-size: 14px; margin: 8px 0 10px; }}
     .message-meta {{ display: flex; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: 12px; }}
     .message-links {{ display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; margin-top: 8px; }}
@@ -503,7 +507,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
     .domain-card li span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }}
     .charts {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     .chart-card {{ margin: 0; padding: 12px; }}
-    .chart-card img {{ width: 100%; display: block; border-radius: 6px; border: 1px solid var(--line); }}
+    .chart-card img {{ width: 100%; max-height: 72vh; object-fit: contain; display: block; border-radius: 6px; border: 1px solid var(--line); background: #fff; }}
     .chart-card figcaption {{ padding-top: 8px; color: var(--muted); font-size: 13px; }}
     .toolbar {{ display: flex; gap: 10px; margin-bottom: 12px; }}
     input {{ width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; font-size: 15px; background: white; }}
@@ -524,11 +528,11 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
         <h1>Dashboard {h(subject_display)}</h1>
         <p class="subtitle">Analisis exploratorio de mensajes de Telegram sobre {h(subject_display)}. Dataset: <strong>{h(dataset_name)}</strong>, periodo {h(date_min)} a {h(date_max)}.</p>
         <div class="actions">
-          <a class="button" href="{h(csv_data_uri)}" download="{h(csv_path.name)}">Descargar CSV original</a>
+          <a class="button" href="{h(csv_path.name)}" download="{h(csv_path.name)}">Descargar CSV original</a>
           <a class="button secondary" href="#explorador">Explorar mensajes</a>
         </div>
       </div>
-      <div class="notice">Nota: todas las secciones generales analizan el conjunto completo de mensajes recuperados sobre {h(subject_display)}. La seccion especial es un subconjunto configurable: {h(focus_label)}. El dashboard no verifica si esas afirmaciones son ciertas; sirve para localizar, comparar y auditar mensajes y enlaces. Este HTML incluye el CSV original completo ({fmt_int(csv_size)} bytes) para descarga offline.</div>
+      <div class="notice">Nota: todas las secciones generales analizan el conjunto completo de mensajes recuperados sobre {h(subject_display)}. La seccion especial es un subconjunto configurable: {h(focus_label)}. El dashboard no verifica si esas afirmaciones son ciertas; sirve para localizar, comparar y auditar mensajes y enlaces. El CSV original completo pesa {fmt_int(csv_size)} bytes y queda enlazado como archivo local.</div>
     </header>
 
     <section class="grid kpis">
@@ -592,7 +596,7 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
 
     <section id="explorador" class="section card">
       <h2>Explorador rapido</h2>
-      <p class="small">Filtra sobre los {fmt_int(len(explorer_rows))} mensajes del dataset. Para mantener fluida la pantalla, cada busqueda muestra hasta 250 resultados.</p>
+      <p class="small">Las estadisticas usan los {fmt_int(explorer_total)} mensajes del dataset. Para mantener fluida la pantalla, este explorador carga los {fmt_int(len(explorer_embedded))} mensajes mas recientes y cada busqueda muestra hasta 250 resultados.</p>
       <div class="toolbar"><input id="search" type="search" placeholder="Buscar: imputado, Plus Ultra, Maduro, canal, dominio..."></div>
       <div class="explorer"><table>
         <thead><tr><th>Fecha</th><th>Canal</th><th>Vistas</th><th>Titular / resumen</th><th>Temas</th><th>Links</th></tr></thead>
