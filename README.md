@@ -202,6 +202,7 @@ Opciones:
 - Descargar un canal.
 - Crear un dataset desde un archivo con una lista de canales.
 - Crear un dataset snowball usando los canales relacionados detectados al descargar un canal raiz.
+- Importar un JSON exportado desde Telegram Desktop.
 
 El archivo de lista debe contener un canal por linea:
 
@@ -229,6 +230,33 @@ Flujo recomendado:
 2. Comprobar que existe `data/<canal>/related_channels.csv`.
 3. Usar **Crear dataset snowball**.
 4. Elegir nombre de dataset o dejar el valor por defecto `<canal>_n2`.
+
+### Importar JSON de Telegram Desktop
+
+Telegram Desktop permite exportar un canal en formato JSON. La app puede convertir ese archivo a la misma estructura usada por las capturas normales:
+
+```text
+data/<username>/
+  msgs_dataset.csv
+  collected_chats.csv
+  collected_chats_full.csv
+  counter.csv
+  related_channels.csv
+  context/
+```
+
+En la pestaña **Captura**, usa **Importar JSON de Telegram Desktop**:
+
+- Archivo JSON: el archivo exportado, normalmente `result.json`.
+- Enlace del canal: por ejemplo `https://t.me/Partido_Popular`.
+
+La carpeta de salida se calcula a partir del enlace. Por ejemplo, `https://t.me/Partido_Popular` se guarda en:
+
+```text
+data/partido_popular/
+```
+
+La utilidad reconstruye los enlaces de mensajes como `https://t.me/Partido_Popular/<id_mensaje>`. Los campos que el JSON exportado no incluye, como vistas o numero de forwards recibidos, se rellenan con `0` para mantener las mismas cabeceras que `main.py`.
 
 ### Buscar por termino
 
@@ -259,9 +287,18 @@ Permite:
 - Generar graficos.
 - Generar dashboard HTML.
 - Buscar IOCs de pago.
+- Detectar indicios revisables de odio, teorias conspirativas y desinformacion.
 - Generar red GEXF de forwards.
 
-Los graficos se generan en formato 1920x1080, con paleta pastel y fuente Century Gothic si esta disponible en el sistema.
+Los graficos se generan en formato 1920x1080, con paleta de colores vivos y fuente Century Gothic si esta disponible en el sistema. Incluyen tarjetas KPI, rankings de forwards, timelines, dominios y nube de palabras.
+
+La funcion **Detectar temas** genera:
+
+```text
+theme_flags.csv
+```
+
+Marca indicios por reglas transparentes en categorias como odio contra grupos, deshumanizacion, violencia/exclusion, teorias conspirativas, desinformacion de salud/ciencia, fraude institucional y alarma desinformativa. No es una clasificacion definitiva: requiere revision humana y contexto.
 
 ### Canales similares
 
@@ -340,6 +377,12 @@ Crear dataset snowball desde un canal ya descargado:
 python scripts/build-dataset.py --dataset-name canalraiz_n2 --channel-list data/canalraiz/related_channels.csv
 ```
 
+Importar un JSON exportado por Telegram Desktop:
+
+```powershell
+python scripts/import_telegram_json.py --json json/result.json --channel-link https://t.me/Partido_Popular
+```
+
 Buscar terminos en una lista:
 
 ```powershell
@@ -350,6 +393,12 @@ Detectar IOCs en un dataset:
 
 ```powershell
 python scripts/filtrobtc.py --dataset midataset
+```
+
+Detectar indicios de odio, conspirativas y desinformacion:
+
+```powershell
+python scripts/detect_themes.py --dataset midataset
 ```
 
 Descubrir canales similares:
