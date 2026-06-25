@@ -6,10 +6,16 @@ import json
 import math
 import re
 import sys
+import unicodedata
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse, unquote
+
+try:
+    from nltk.corpus import stopwords as nltk_stopwords
+except Exception:
+    nltk_stopwords = None
 
 
 REQUIRED_COLS = {"date", "message", "views", "msg_link"}
@@ -40,6 +46,33 @@ TOPIC_PATTERNS = {
     "ETA / pactos": re.compile(r"\beta|bildu|presos|terrorismo\b", re.IGNORECASE),
     "Marruecos / exterior": re.compile(r"\bmarruecos|sahara|ceuta|melilla|exteriores\b", re.IGNORECASE),
 }
+
+TOPIC_STOPWORDS = {
+    "para", "pero", "porque", "como", "cuando", "donde", "desde", "hasta", "entre",
+    "sobre", "contra", "ante", "bajo", "tras", "durante", "mediante", "segun", "sin",
+    "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas", "aquel", "aquella",
+    "todo", "toda", "todos", "todas", "otro", "otra", "otros", "otras", "algo", "nada",
+    "mucho", "mucha", "muchos", "muchas", "poco", "poca", "cada", "mismo", "misma",
+    "tambien", "aunque", "solo", "puede", "pueden", "tiene", "tienen", "hacer", "hace",
+    "hecho", "ser", "estar", "haber", "hay", "son", "fue", "han", "una", "uno", "unos",
+    "unas", "del", "las", "los", "que", "con", "por", "mas", "muy", "sus", "esto",
+    "eso", "aqui", "alli", "ahora", "bien", "mal", "dice", "dijo", "ver", "vamos",
+    "gracias", "hola", "buenos", "buenas", "canal", "grupo", "mensaje", "mensajes",
+    "telegram", "video", "foto", "audio", "enlace", "http", "https", "www", "com", "org",
+    "haz", "clic", "reporte", "reportar", "enviado", "bot", "privado", "privada",
+    "the", "and", "that", "this", "with", "from", "have", "has", "had", "been",
+    "were", "was", "are", "for", "you", "your", "they", "their", "them", "his",
+    "her", "its", "our", "who", "what", "when", "where", "which", "will", "would",
+    "could", "should", "can", "cannot", "than", "then", "there", "here", "more",
+    "most", "some", "any", "all", "not", "but", "about", "into", "over", "after",
+    "before", "being", "because", "through", "during", "while", "just", "only",
+    "also", "very", "much", "many", "make", "made", "get", "got", "now", "new",
+    "one", "two", "year", "years", "old", "subscribe", "please", "click", "share",
+    "look", "looks", "like", "admin", "post", "posts", "tiktok", "retards_tiktok",
+    "retardsoftiktok",
+}
+TOPIC_TOKEN_RE = re.compile(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]{2,}")
+MAX_DETECTED_TOPICS = 8
 
 CHARTS = [
     ("KPIs principales", "00_kpi_cards.png"),
@@ -100,6 +133,7 @@ def normalise_row(row):
         "links": links,
         "domains": domains,
         "topic_hits": [],
+        "is_focus": False,
     }
 
 
@@ -133,7 +167,10 @@ def parse_date(value):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
     except ValueError:
         return None
 
@@ -214,6 +251,20 @@ def message_score(row, extra=0):
     return row["views"] + row["forwards"] * 250 + row["replies"] * 100 + extra
 
 
+def dedupe_message_rows(rows):
+    unique = []
+    seen = set()
+    for row in rows:
+        fingerprint = normalise_topic_text(URL_RE.sub(" ", row["message"]))
+        fingerprint = re.sub(r"\s+", " ", fingerprint).strip()
+        key = ("text", fingerprint) if len(fingerprint) >= 30 else ("link", row["msg_link"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
 def build_subject_regex(subject, aliases):
     terms = [subject] + list(aliases or [])
     terms = [t.strip() for t in terms if t and t.strip()]
@@ -229,12 +280,95 @@ def build_focus_regex(pattern):
     return re.compile(pattern, re.IGNORECASE)
 
 
+def build_focus_terms_regex(value):
+    terms = [term.strip() for term in (value or "").split(",") if term.strip()]
+    if not terms:
+        return None
+    pattern = "|".join(re.escape(term) for term in sorted(set(terms), key=len, reverse=True))
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def normalise_topic_text(value):
+    value = unicodedata.normalize("NFKD", value or "")
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return value.lower()
+
+
+def load_multilingual_stopwords():
+    words = set(TOPIC_STOPWORDS)
+    if nltk_stopwords is None:
+        return words
+    for language in ("spanish", "english", "french", "german", "italian", "portuguese", "dutch"):
+        try:
+            words.update(normalise_topic_text(word) for word in nltk_stopwords.words(language))
+        except LookupError:
+            break
+    return words
+
+
+MULTILINGUAL_STOPWORDS = load_multilingual_stopwords()
+
+
+def topic_tokens(message):
+    tokens = []
+    for token in TOPIC_TOKEN_RE.findall(normalise_topic_text(URL_RE.sub(" ", message or ""))):
+        if token not in MULTILINGUAL_STOPWORDS and not token.isdigit():
+            tokens.append(token)
+    return tokens
+
+
+def detect_dataset_topics(rows):
+    if not rows:
+        return []
+    sample_limit = 100000
+    step = max(1, math.ceil(len(rows) / sample_limit))
+    phrase_counts = Counter()
+    sampled = rows[::step]
+    tokenised_messages = [topic_tokens(row["message"]) for row in sampled]
+    message_counts = Counter(" ".join(tokens) for tokens in tokenised_messages if tokens)
+
+    for tokens in tokenised_messages:
+        fingerprint = " ".join(tokens)
+        if not tokens or message_counts[fingerprint] > 5:
+            continue
+        seen = set()
+        for size in (3, 2):
+            for index in range(len(tokens) - size + 1):
+                phrase = tuple(tokens[index:index + size])
+                if len(set(phrase)) > 1:
+                    seen.add(phrase)
+        phrase_counts.update(seen)
+
+    minimum = max(3, len(sampled) // 2000)
+    candidates = [
+        (phrase, count)
+        for phrase, count in phrase_counts.most_common(200)
+        if count >= minimum
+    ]
+    selected = []
+    used_tokens = set()
+    for phrase, _count in candidates:
+        phrase_tokens = set(phrase)
+        if len(phrase_tokens & used_tokens) >= max(1, len(phrase_tokens) - 1):
+            continue
+        selected.append(" ".join(phrase))
+        used_tokens.update(phrase_tokens)
+        if len(selected) >= MAX_DETECTED_TOPICS:
+            break
+    return selected
+
+
 def analyse(rows, subject_re, focus_re, focus_label):
+    detected_topics = detect_dataset_topics(rows)
     for row in rows:
         msg = row["message"]
-        row["topic_hits"] = [name for name, rx in TOPIC_PATTERNS.items() if rx.search(msg)]
-        if is_focus_message(msg, subject_re, focus_re):
-            row["topic_hits"].insert(0, focus_label)
+        normalised_message = " ".join(topic_tokens(msg))
+        row["topic_hits"] = [
+            topic.title()
+            for topic in detected_topics
+            if topic in normalised_message
+        ]
+        row["is_focus"] = is_focus_message(msg, subject_re, focus_re)
 
     dated = [r for r in rows if r["dt"]]
     total_views = sum(r["views"] for r in rows)
@@ -251,9 +385,13 @@ def analyse(rows, subject_re, focus_re, focus_label):
         for t in r["topic_hits"]:
             topic_counts[t] += 1
 
-    imputacion = [r for r in rows if focus_label in r["topic_hits"]]
-    high_impact = sorted(rows, key=lambda r: message_score(r), reverse=True)[:30]
-    imputacion_top = sorted(imputacion, key=lambda r: message_score(r, 50000), reverse=True)[:40]
+    imputacion = [r for r in rows if r["is_focus"]]
+    high_impact = dedupe_message_rows(
+        sorted(rows, key=lambda r: message_score(r), reverse=True)
+    )[:30]
+    imputacion_top = dedupe_message_rows(
+        sorted(imputacion, key=lambda r: message_score(r, 50000), reverse=True)
+    )[:40]
     linked = [r for r in rows if r["links"]]
     linked_top = sorted(linked, key=lambda r: message_score(r), reverse=True)[:40]
 
@@ -361,6 +499,8 @@ def domain_cards(stats, limit=12):
 
 
 def topic_bars(stats):
+    if not stats["topic_counts"]:
+        return '<p class="small">No hay suficiente repeticion textual para extraer temas fiables.</p>'
     max_count = max(stats["topic_counts"].values() or [1])
     bars = []
     for topic, count in stats["topic_counts"].most_common():
@@ -550,7 +690,8 @@ def render_dashboard(dataset_name: str, dataset_dir: Path, csv_path: Path, rows,
         <p>Las secciones de canales, dominios, graficos, impacto y explorador cubren todo el contenido del dataset. La seccion especial separa los mensajes que cumplen el patron configurado para <strong>{h(focus_label)}</strong>.</p>
       </div>
       <div class="card">
-        <h2>Temas detectados</h2>
+        <h2>Temas detectados automaticamente</h2>
+        <p class="small">Expresiones frecuentes extraidas del contenido del dataset. No son categorias predefinidas.</p>
         {topic_bars(stats)}
       </div>
     </section>
@@ -637,6 +778,11 @@ def main():
     parser.add_argument("--aliases", default="", help="Alias separados por comas para detectar el sujeto en el foco")
     parser.add_argument("--focus-label", default=None, help="Nombre de la seccion especial")
     parser.add_argument(
+        "--focus-terms",
+        default="",
+        help="Terminos literales separados por comas. Si se indican, sustituyen el foco predeterminado.",
+    )
+    parser.add_argument(
         "--focus-regex",
         default=DEFAULT_FOCUS_TERMS_PATTERN,
         help="Regex para seleccionar mensajes del foco especial (default: terminos judiciales/imputacion)",
@@ -664,11 +810,17 @@ def main():
     aliases = [part.strip() for part in args.aliases.split(",") if part.strip()]
     if dataset_name.lower() == "zapatero" and not aliases:
         aliases = ["zapatero", "rodriguez zapatero", "rodriguez", "jose luis rodriguez"]
-    focus_label = args.focus_label or f"Imputacion / investigacion de {subject_display}"
+    custom_focus_re = build_focus_terms_regex(args.focus_terms)
+    if custom_focus_re:
+        focus_label = args.focus_label or "Foco personalizado"
+        subject_re = None
+        focus_re = custom_focus_re
+    else:
+        focus_label = args.focus_label or f"Imputacion / investigacion de {subject_display}"
+        subject_re = build_subject_regex(subject_display, aliases)
+        focus_re = build_focus_regex(args.focus_regex)
 
     rows = load_rows(csv_path)
-    subject_re = build_subject_regex(subject_display, aliases)
-    focus_re = build_focus_regex(args.focus_regex)
     stats = analyse(rows, subject_re, focus_re, focus_label)
     out = dataset_dir / "dashboard.html"
     out.write_text(

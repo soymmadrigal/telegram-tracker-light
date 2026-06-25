@@ -10,9 +10,10 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import pandas as pd
-from telethon import TelegramClient, errors
+from telethon import errors
 from telethon.tl import types
 
+from api import get_connection
 from utils import (
 	create_dirs,
 	get_config_attrs,
@@ -268,7 +269,12 @@ async def main_async():
 		raise ValueError('No hay terminos de busqueda.')
 
 	config = get_config_attrs()
-	client = TelegramClient('session_file', int(config['api_id']), config['api_hash'])
+	client = await get_connection(
+		'session_file',
+		int(config['api_id']),
+		config['api_hash'],
+		config['phone'],
+	)
 	channels = read_channels(args)
 
 	dataset_folder = None
@@ -278,7 +284,7 @@ async def main_async():
 		with open(os.path.join(dataset_folder, 'channel_list.csv'), 'w', encoding='utf-8') as out:
 			out.write('\n'.join(channels) + '\n')
 
-	async with client:
+	try:
 		for channel in channels:
 			output_folder = os.path.join(args.output_data, channel)
 			create_dirs(output_folder)
@@ -299,6 +305,8 @@ async def main_async():
 			if dataset_folder:
 				append_csv(os.path.join(dataset_folder, 'collected_chats.csv'), [chat_row_from_entity(entity)], chats_dataset_columns())
 				append_csv(os.path.join(dataset_folder, 'msgs_dataset.csv'), rows, msgs_dataset_columns())
+	finally:
+		await client.disconnect()
 
 	if dataset_folder and os.path.exists(os.path.join(dataset_folder, 'collected_chats.csv')):
 		df = pd.read_csv(os.path.join(dataset_folder, 'collected_chats.csv'), low_memory=False)

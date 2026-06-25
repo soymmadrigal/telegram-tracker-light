@@ -38,13 +38,15 @@ def chat_row(info):
 
 async def obtener_canales_similares(cliente, canal):
 	try:
+		print(f'> Consultando recomendaciones de @{canal}...', flush=True)
 		resultado = await cliente(functions.channels.GetChannelRecommendationsRequest(channel=canal))
+		print(f'> Telegram devolvio {len(resultado.chats)} recomendaciones para @{canal}.', flush=True)
 		return resultado.chats
 	except RpcCallFailError as exc:
-		print(f'Error de Telegram API al obtener recomendaciones: {exc}')
+		print(f'Error de Telegram API al obtener recomendaciones: {exc}', flush=True)
 		return []
 	except Exception as exc:
-		print(f'Error inesperado al obtener recomendaciones de {canal}: {exc}')
+		print(f'Error inesperado al obtener recomendaciones de {canal}: {exc}', flush=True)
 		return []
 
 
@@ -93,7 +95,10 @@ async def crear_grafo(cliente, canal, profundidad_maxima=1, max_recomendaciones=
 		if nivel_actual >= profundidad_maxima:
 			continue
 
-		print(f'Buscando similares de {canal_actual} en nivel {nivel_actual + 1}/{profundidad_maxima}')
+		print(
+			f'> Procesando @{canal_actual} - nivel {nivel_actual + 1}/{profundidad_maxima}',
+			flush=True,
+		)
 		canales = await obtener_canales_similares(cliente, canal_actual)
 		for i, canal_similar in enumerate(canales):
 			if max_recomendaciones is not None and i >= max_recomendaciones:
@@ -116,6 +121,11 @@ async def crear_grafo(cliente, canal, profundidad_maxima=1, max_recomendaciones=
 				})
 
 			if username not in catalog:
+				if i == 0 or (i + 1) % 5 == 0 or i + 1 == len(canales):
+					print(
+						f'> Analizando recomendacion {i + 1}/{len(canales)}: @{username}',
+						flush=True,
+					)
 				catalog[username] = {
 					'id': canal_similar.id,
 					'username': username,
@@ -210,10 +220,14 @@ async def main_async():
 	canal = args.canal.strip().lstrip('@')
 	dataset_name = args.dataset_name or f'{canal}_similar'
 	output_folder = os.path.join(args.output, dataset_name)
+	print(f'> Iniciando descubrimiento de canales similares para @{canal}.', flush=True)
+	print(f'> Profundidad: {args.profundidad}. Salida: {output_folder}', flush=True)
 	create_dirs(output_folder)
 
 	config = get_config_attrs()
+	print('> Conectando con Telegram...', flush=True)
 	async with TelegramClient('session_file', int(config['api_id']), config['api_hash']) as cliente:
+		print('> Conexion establecida. Buscando recomendaciones...', flush=True)
 		catalog, aristas, eventos, conteo_nivel, duplicados, sin_username = await crear_grafo(
 			cliente,
 			canal=canal,
@@ -221,21 +235,22 @@ async def main_async():
 			max_recomendaciones=args.max_recomendaciones,
 		)
 
+	print('> Guardando CSV y grafos...', flush=True)
 	guardar_salidas(output_folder, canal, catalog, aristas, eventos)
 	with open(os.path.join(output_folder, 'context', f'{dataset_name}_log.csv'), 'a', encoding='utf-8') as log:
 		if log.tell() == 0:
 			log.write('channel,type,date\n')
 		log.write(f'{canal},similar_channels,{datetime.now()}\n')
 
-	print('===== RESUMEN =====')
-	print(f'Dataset: {output_folder}')
-	print(f'Canal semilla: {canal}')
-	print(f'Canales descubiertos: {len(catalog)}')
-	print(f'Aristas: {len(aristas)}')
-	print(f'Duplicados descartados: {duplicados}')
-	print(f'Sugerencias sin username descartadas: {sin_username}')
+	print('===== RESUMEN =====', flush=True)
+	print(f'Dataset: {output_folder}', flush=True)
+	print(f'Canal semilla: {canal}', flush=True)
+	print(f'Canales descubiertos: {len(catalog)}', flush=True)
+	print(f'Aristas: {len(aristas)}', flush=True)
+	print(f'Duplicados descartados: {duplicados}', flush=True)
+	print(f'Sugerencias sin username descartadas: {sin_username}', flush=True)
 	for nivel in range(1, args.profundidad + 1):
-		print(f'Nivel {nivel}: {conteo_nivel.get(nivel, 0)}')
+		print(f'Nivel {nivel}: {conteo_nivel.get(nivel, 0)}', flush=True)
 
 
 if __name__ == '__main__':
