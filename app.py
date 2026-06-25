@@ -9,7 +9,9 @@ import threading
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 
 ROOT = Path(__file__).resolve().parent
@@ -18,57 +20,67 @@ CONFIG_PATH = ROOT / "config" / "config.ini"
 TELEGRAM_APPS_URL = "https://my.telegram.org/auth?to=apps"
 
 
-class TrackerApp(tk.Tk):
+class TrackerApp(ctk.CTk):
 	def __init__(self):
 		super().__init__()
+		ctk.set_appearance_mode("light")
+		ctk.set_default_color_theme("blue")
+		ctk.set_widget_scaling(1.06)
 		self.title("Telegram Tracker Light")
-		self.geometry("1280x820")
-		self.minsize(1120, 720)
+		self.geometry("1400x900")
+		self.minsize(1240, 800)
 		self.output_queue = queue.Queue()
 		self.running_process = None
-		self._build_style()
 		self._build_layout()
 		self._load_config()
 		self._poll_output()
 
-	def _build_style(self):
-		style = ttk.Style(self)
-		try:
-			style.theme_use("clam")
-		except tk.TclError:
-			pass
-		style.configure("TFrame", background="#f5f7fa")
-		style.configure("TLabel", background="#f5f7fa", foreground="#20242a", font=("Segoe UI", 10))
-		style.configure("Header.TLabel", font=("Segoe UI", 18, "bold"))
-		style.configure("Subtle.TLabel", foreground="#606a78")
-		style.configure("TButton", font=("Segoe UI", 10), padding=(10, 6))
-		style.configure("Primary.TButton", background="#0f766e", foreground="#ffffff")
-		style.configure("TNotebook", background="#f5f7fa", borderwidth=0)
-		style.configure("TNotebook.Tab", padding=(14, 8), font=("Segoe UI", 10))
-		style.configure("Card.TFrame", background="#ffffff", relief="solid", borderwidth=1)
-		style.configure("Card.TLabel", background="#ffffff")
-
 	def _build_layout(self):
+		self.configure(fg_color="#f4f7fb")
 		self.columnconfigure(0, weight=1)
 		self.rowconfigure(1, weight=1)
+		self.rowconfigure(2, weight=0)
 
-		header = ttk.Frame(self, padding=(18, 16, 18, 8))
-		header.grid(row=0, column=0, sticky="ew")
+		header = ctk.CTkFrame(self, fg_color="transparent")
+		header.grid(row=0, column=0, sticky="ew", padx=22, pady=(18, 8))
 		header.columnconfigure(0, weight=1)
-		ttk.Label(header, text="Telegram Tracker Light", style="Header.TLabel").grid(row=0, column=0, sticky="w")
-		ttk.Label(
+		ctk.CTkLabel(
+			header,
+			text="Telegram Tracker Light",
+			font=ctk.CTkFont("Segoe UI", 29, "bold"),
+			text_color="#111827",
+		).grid(row=0, column=0, sticky="w")
+		ctk.CTkLabel(
 			header,
 			text="Panel local para configurar, capturar, buscar y analizar canales de Telegram.",
-			style="Subtle.TLabel",
+			font=ctk.CTkFont("Segoe UI", 15),
+			text_color="#607086",
 		).grid(row=1, column=0, sticky="w", pady=(4, 0))
 		self.status_var = tk.StringVar(value="Listo")
-		ttk.Label(header, textvariable=self.status_var, style="Subtle.TLabel").grid(row=0, column=1, sticky="e")
+		self.status_badge = ctk.CTkLabel(
+			header,
+			textvariable=self.status_var,
+			height=34,
+			corner_radius=17,
+			fg_color="#e6f4ff",
+			text_color="#075985",
+			font=ctk.CTkFont("Segoe UI", 13, "bold"),
+			padx=16,
+		)
+		self.status_badge.grid(row=0, column=1, sticky="e")
 
-		main = ttk.PanedWindow(self, orient=tk.VERTICAL)
-		main.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-
-		self.tabs = ttk.Notebook(main)
-		main.add(self.tabs, weight=3)
+		self.tabs = ctk.CTkTabview(
+			self,
+			fg_color="#ffffff",
+			segmented_button_fg_color="#e5ebf3",
+			segmented_button_selected_color="#0f766e",
+			segmented_button_selected_hover_color="#115e59",
+			segmented_button_unselected_color="#e5ebf3",
+			segmented_button_unselected_hover_color="#d6dee9",
+			text_color="#111827",
+			corner_radius=12,
+		)
+		self.tabs.grid(row=1, column=0, sticky="nsew", padx=22, pady=(0, 12))
 
 		self._build_setup_tab()
 		self._build_capture_tab()
@@ -76,65 +88,80 @@ class TrackerApp(tk.Tk):
 		self._build_analysis_tab()
 		self._build_network_tab()
 
-		console_frame = ttk.Frame(main, padding=(0, 10, 0, 0))
+		console_frame = ctk.CTkFrame(self, fg_color="#ffffff", corner_radius=12)
+		console_frame.grid(row=2, column=0, sticky="nsew", padx=22, pady=(0, 18))
 		console_frame.rowconfigure(1, weight=1)
 		console_frame.columnconfigure(0, weight=1)
-		toolbar = ttk.Frame(console_frame)
-		toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-		ttk.Label(toolbar, text="Salida de ejecucion").pack(side=tk.LEFT)
-		ttk.Button(toolbar, text="Limpiar", command=self._clear_console).pack(side=tk.RIGHT)
-		ttk.Button(toolbar, text="Detener", command=self._stop_process).pack(side=tk.RIGHT, padx=(0, 8))
-		self.console = tk.Text(console_frame, height=11, wrap="word", bg="#111827", fg="#e5e7eb", insertbackground="#e5e7eb")
-		self.console.grid(row=1, column=0, sticky="nsew")
-		input_bar = ttk.Frame(console_frame)
-		input_bar.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+		toolbar = ctk.CTkFrame(console_frame, fg_color="transparent")
+		toolbar.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 8))
+		ctk.CTkLabel(toolbar, text="Salida de ejecucion", font=ctk.CTkFont("Segoe UI", 15, "bold"), text_color="#111827").pack(side=tk.LEFT)
+		ctk.CTkButton(toolbar, text="Limpiar", width=110, height=36, font=ctk.CTkFont("Segoe UI", 14, "bold"), command=self._clear_console).pack(side=tk.RIGHT)
+		ctk.CTkButton(toolbar, text="Detener", width=110, height=36, font=ctk.CTkFont("Segoe UI", 14, "bold"), fg_color="#dc2626", hover_color="#b91c1c", command=self._stop_process).pack(side=tk.RIGHT, padx=(0, 8))
+		self.console = ctk.CTkTextbox(
+			console_frame,
+			height=170,
+			wrap="word",
+			fg_color="#111827",
+			text_color="#e5e7eb",
+			font=ctk.CTkFont("Cascadia Mono", 13),
+		)
+		self.console.grid(row=1, column=0, sticky="nsew", padx=14)
+		input_bar = ctk.CTkFrame(console_frame, fg_color="transparent")
+		input_bar.grid(row=2, column=0, sticky="ew", padx=14, pady=(10, 14))
 		input_bar.columnconfigure(1, weight=1)
-		ttk.Label(input_bar, text="Entrada a consola").grid(row=0, column=0, sticky="w", padx=(0, 8))
+		ctk.CTkLabel(input_bar, text="Entrada a consola", font=ctk.CTkFont("Segoe UI", 14), text_color="#334155").grid(row=0, column=0, sticky="w", padx=(0, 8))
 		self.process_input_var = tk.StringVar()
-		self.process_input_entry = ttk.Entry(input_bar, textvariable=self.process_input_var)
+		self.process_input_entry = ctk.CTkEntry(input_bar, textvariable=self.process_input_var, height=38, font=ctk.CTkFont("Segoe UI", 14))
 		self.process_input_entry.grid(row=0, column=1, sticky="ew")
 		self.process_input_entry.bind("<Return>", lambda event: self._send_process_input())
-		ttk.Button(input_bar, text="Enviar", command=self._send_process_input).grid(row=0, column=2, padx=(8, 0))
-		main.add(console_frame, weight=1)
+		ctk.CTkButton(input_bar, text="Enviar", width=110, height=38, font=ctk.CTkFont("Segoe UI", 14, "bold"), command=self._send_process_input).grid(row=0, column=2, padx=(8, 0))
+		self._polish_controls()
+
+	def _polish_controls(self, parent=None):
+		parent = parent or self
+		for child in parent.winfo_children():
+			if isinstance(child, ctk.CTkButton):
+				child.configure(height=38, corner_radius=8, font=ctk.CTkFont("Segoe UI", 14, "bold"))
+			elif isinstance(child, ctk.CTkRadioButton):
+				child.configure(font=ctk.CTkFont("Segoe UI", 14), radiobutton_width=20, radiobutton_height=20)
+			elif isinstance(child, ctk.CTkCheckBox):
+				child.configure(font=ctk.CTkFont("Segoe UI", 14), checkbox_width=20, checkbox_height=20)
+			elif isinstance(child, ctk.CTkSegmentedButton):
+				child.configure(font=ctk.CTkFont("Segoe UI", 14, "bold"))
+			self._polish_controls(child)
+
+	def _add_tab(self, name):
+		self.tabs.add(name)
+		tab = self.tabs.tab(name)
+		tab.configure(fg_color="#ffffff")
+		tab.columnconfigure(0, weight=1)
+		tab.columnconfigure(1, weight=1)
+		return tab
 
 	def _card(self, parent, title, row, column, columnspan=1):
-		frame = ttk.Frame(parent, style="Card.TFrame", padding=16)
-		frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=8, pady=8)
+		frame = ctk.CTkFrame(parent, fg_color="#f8fafc", border_color="#d8e1ec", border_width=1, corner_radius=12)
+		frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=10, pady=10)
 		frame.columnconfigure(1, weight=1)
 		frame.columnconfigure(2, weight=0)
-		ttk.Label(frame, text=title, style="Card.TLabel", font=("Segoe UI", 12, "bold")).grid(
-			row=0, column=0, columnspan=3, sticky="w", pady=(0, 12)
+		ctk.CTkLabel(frame, text=title, font=ctk.CTkFont("Segoe UI", 17, "bold"), text_color="#111827").grid(
+			row=0, column=0, columnspan=3, sticky="w", padx=18, pady=(18, 12)
 		)
 		return frame
 
 	def _entry(self, parent, label, variable, row, show=None):
-		ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=5)
-		entry = ttk.Entry(parent, textvariable=variable, show=show)
-		entry.grid(row=row, column=1, sticky="ew", pady=5, padx=(10, 0))
+		ctk.CTkLabel(parent, text=label, font=ctk.CTkFont("Segoe UI", 14), text_color="#334155").grid(row=row, column=0, sticky="w", padx=(18, 0), pady=7)
+		entry = ctk.CTkEntry(parent, textvariable=variable, show=show, fg_color="#ffffff", height=38, font=ctk.CTkFont("Segoe UI", 14))
+		entry.grid(row=row, column=1, sticky="ew", pady=7, padx=(12, 0))
 		return entry
 
 	def _secret_entry(self, parent, label, variable, row):
-		ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=5)
-		entry = tk.Entry(
-			parent,
-			textvariable=variable,
-			show="*",
-			borderwidth=1,
-			relief="solid",
-			font=("Segoe UI", 10),
-			bg="#ffffff",
-			fg="#20242a",
-			insertbackground="#20242a",
-		)
-		entry.grid(row=row, column=1, sticky="ew", pady=5, padx=(10, 0), ipady=4)
-		return entry
+		return self._entry(parent, label, variable, row, show="*")
 
 	def _build_setup_tab(self):
-		tab = ttk.Frame(self.tabs, padding=10)
+		tab = self._add_tab("Configuracion")
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
 		tab.rowconfigure(0, weight=1)
-		self.tabs.add(tab, text="Configuracion")
 
 		card = self._card(tab, "Credenciales de Telegram", 0, 0)
 		self.api_id_var = tk.StringVar()
@@ -146,23 +173,24 @@ class TrackerApp(tk.Tk):
 		self.phone_entry = self._secret_entry(card, "Telefono", self.phone_var, 3)
 		self.telegram_code_var = tk.StringVar()
 		self.telegram_code_entry = self._secret_entry(card, "Codigo Telegram (si lo solicita)", self.telegram_code_var, 4)
-		ttk.Button(card, text="Enviar codigo", command=self._send_telegram_code).grid(
-			row=4, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(card, text="Enviar codigo", command=self._send_telegram_code).grid(
+			row=4, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Checkbutton(
+		ctk.CTkCheckBox(
 			card,
 			text="Mostrar credenciales",
 			variable=self.show_credentials_var,
 			command=self._toggle_credentials_visibility,
+			text_color="#334155",
 		).grid(row=5, column=1, sticky="w", padx=(10, 0), pady=(12, 0))
-		ttk.Button(card, text="Abrir pagina de Telegram", command=lambda: webbrowser.open(TELEGRAM_APPS_URL)).grid(
-			row=6, column=0, sticky="w", pady=(14, 0)
+		ctk.CTkButton(card, text="Abrir pagina de Telegram", command=lambda: webbrowser.open(TELEGRAM_APPS_URL)).grid(
+			row=6, column=0, sticky="w", padx=(16, 0), pady=(14, 16)
 		)
-		ttk.Button(card, text="Autorizar sesion", command=self._run_login).grid(
-			row=6, column=1, sticky="w", padx=(10, 0), pady=(14, 0)
+		ctk.CTkButton(card, text="Autorizar sesion", command=self._run_login).grid(
+			row=6, column=1, sticky="w", padx=(10, 0), pady=(14, 16)
 		)
-		ttk.Button(card, text="Guardar configuracion", command=self._save_config).grid(
-			row=6, column=2, sticky="e", pady=(14, 0)
+		ctk.CTkButton(card, text="Guardar configuracion", command=self._save_config).grid(
+			row=6, column=2, sticky="e", padx=(8, 16), pady=(14, 16)
 		)
 
 		help_card = self._card(tab, "Como obtener api_id y api_hash", 0, 1)
@@ -177,29 +205,27 @@ class TrackerApp(tk.Tk):
 			"por ejemplo +34123456789.\n\n"
 			"No compartas config/config.ini."
 		)
-		ttk.Label(help_card, text=steps, style="Card.TLabel", justify="left", wraplength=420).grid(
-			row=1, column=0, sticky="nw"
+		ctk.CTkLabel(help_card, text=steps, justify="left", wraplength=460, text_color="#334155").grid(
+			row=1, column=0, sticky="nw", padx=16, pady=(0, 0)
 		)
-		ttk.Label(
+		ctk.CTkLabel(
 			help_card,
 			text=TELEGRAM_APPS_URL,
-			style="Card.TLabel",
-			foreground="#255a8f",
-			wraplength=420,
-		).grid(row=2, column=0, sticky="nw", pady=(16, 0))
+			text_color="#075985",
+			wraplength=460,
+		).grid(row=2, column=0, sticky="nw", padx=16, pady=(16, 16))
 
 	def _build_capture_tab(self):
-		tab = ttk.Frame(self.tabs, padding=10)
+		tab = self._add_tab("Captura")
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
-		self.tabs.add(tab, text="Captura")
 
 		channel_card = self._card(tab, "Descargar un canal", 0, 0)
 		self.channel_var = tk.StringVar()
 		self.max_msgs_var = tk.StringVar()
 		self._entry(channel_card, "Canal", self.channel_var, 1)
-		ttk.Button(channel_card, text="Descargar", command=self._run_download_channel).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(channel_card, text="Descargar", command=self._run_download_channel).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 		self._entry(channel_card, "Max mensajes (vacio = sin limite)", self.max_msgs_var, 2)
 
@@ -208,36 +234,52 @@ class TrackerApp(tk.Tk):
 		self.channel_list_var = tk.StringVar()
 		self.dataset_max_msgs_var = tk.StringVar()
 		self._entry(dataset_card, "Dataset", self.dataset_name_var, 1)
-		ttk.Button(dataset_card, text="Crear", command=self._run_build_dataset).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(dataset_card, text="Crear", command=self._run_build_dataset).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 		self._entry(dataset_card, "Lista de canales", self.channel_list_var, 2)
-		ttk.Button(dataset_card, text="Elegir archivo", command=lambda: self._choose_file(self.channel_list_var)).grid(
-			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(dataset_card, text="Elegir archivo", command=lambda: self._choose_file(self.channel_list_var)).grid(
+			row=2, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 		self._entry(dataset_card, "Max mensajes (vacio = sin limite)", self.dataset_max_msgs_var, 3)
 
-		snowball_card = self._card(tab, "Crear dataset snowball", 1, 0, 2)
+		snowball_card = self._card(tab, "Crear dataset snowball", 1, 0)
 		self.snowball_root_var = tk.StringVar()
 		self.snowball_dataset_var = tk.StringVar()
 		self.snowball_max_msgs_var = tk.StringVar()
 		self._entry(snowball_card, "Canal raiz descargado", self.snowball_root_var, 1)
-		ttk.Button(snowball_card, text="Generar snowball", command=self._run_snowball_dataset).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(snowball_card, text="Generar snowball", command=self._run_snowball_dataset).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 		self._entry(snowball_card, "Dataset salida", self.snowball_dataset_var, 2)
 		self._entry(snowball_card, "Max mensajes (vacio = sin limite)", self.snowball_max_msgs_var, 3)
-		ttk.Label(
+		ctk.CTkLabel(
 			snowball_card,
 			text="Usa data/<canal>/related_channels.csv generado al descargar el canal raiz.",
-			style="Card.TLabel",
-		).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+			text_color="#52606d",
+		).grid(row=4, column=0, columnspan=3, sticky="w", padx=16, pady=(10, 16))
+
+		json_card = self._card(tab, "Importar JSON de Telegram Desktop", 1, 1)
+		self.telegram_json_var = tk.StringVar()
+		self.telegram_json_link_var = tk.StringVar()
+		self._entry(json_card, "Archivo JSON", self.telegram_json_var, 1)
+		ctk.CTkButton(json_card, text="Elegir archivo", command=lambda: self._choose_file(self.telegram_json_var)).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
+		)
+		self._entry(json_card, "Enlace del canal", self.telegram_json_link_var, 2)
+		ctk.CTkButton(json_card, text="Importar JSON", command=self._run_import_telegram_json).grid(
+			row=2, column=2, sticky="ew", padx=(8, 16), pady=6
+		)
+		ctk.CTkLabel(
+			json_card,
+			text="Ejemplo: https://t.me/Partido_Popular. La salida se guarda en data/partido_popular.",
+			text_color="#52606d",
+		).grid(row=3, column=0, columnspan=3, sticky="w", padx=16, pady=(10, 16))
 
 	def _build_search_tab(self):
-		tab = ttk.Frame(self.tabs, padding=10)
+		tab = self._add_tab("Buscar por termino")
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
-		self.tabs.add(tab, text="Buscar por termino")
 
 		search_card = self._card(tab, "Buscar mensajes por terminos", 0, 0, 2)
 		self.search_terms_var = tk.StringVar()
@@ -246,11 +288,11 @@ class TrackerApp(tk.Tk):
 		self._entry(search_card, "Nombre del dataset", self.search_dataset_var, 1)
 		self._entry(search_card, "Terminos", self.search_terms_var, 2)
 		self._entry(search_card, "Lista de canales", self.search_list_var, 3)
-		ttk.Button(search_card, text="Elegir archivo", command=lambda: self._choose_file(self.search_list_var)).grid(
-			row=3, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(search_card, text="Elegir archivo", command=lambda: self._choose_file(self.search_list_var)).grid(
+			row=3, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Button(search_card, text="Buscar", command=self._run_search).grid(
-			row=4, column=2, sticky="ew", padx=(8, 0), pady=(12, 0)
+		ctk.CTkButton(search_card, text="Buscar", command=self._run_search).grid(
+			row=4, column=2, sticky="ew", padx=(8, 16), pady=(12, 16)
 		)
 
 		guide_card = self._card(tab, "Como escribir terminos", 1, 0, 2)
@@ -259,52 +301,60 @@ class TrackerApp(tk.Tk):
 			"Ejemplos: bitcoin, paypal  |  \"frase exacta\" OR transferencia\n"
 			"La busqueda se ejecuta en tiempo real sobre la lista de canales seleccionada."
 		)
-		ttk.Label(guide_card, text=text, style="Card.TLabel", justify="left").grid(row=1, column=0, sticky="w")
+		ctk.CTkLabel(guide_card, text=text, justify="left", text_color="#334155").grid(row=1, column=0, sticky="w", padx=16, pady=(0, 16))
 
 	def _build_analysis_tab(self):
-		tab = ttk.Frame(self.tabs, padding=10)
+		tab = self._add_tab("Analisis")
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
-		self.tabs.add(tab, text="Analisis")
 
 		charts_card = self._card(tab, "Graficos y dashboard", 0, 0)
 		self.analysis_name_var = tk.StringVar()
 		self.analysis_mode_var = tk.StringVar(value="dataset")
+		self.dashboard_focus_label_var = tk.StringVar()
+		self.dashboard_focus_terms_var = tk.StringVar()
 		self._entry(charts_card, "Nombre", self.analysis_name_var, 1)
-		ttk.Button(charts_card, text="Graficos", command=self._run_charts).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(charts_card, text="Graficos", command=self._run_charts).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Button(charts_card, text="Dashboard", command=self._run_dashboard).grid(
-			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(charts_card, text="Dashboard", command=self._run_dashboard).grid(
+			row=2, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Radiobutton(charts_card, text="Dataset", variable=self.analysis_mode_var, value="dataset").grid(row=2, column=0, sticky="w")
-		ttk.Radiobutton(charts_card, text="Canal", variable=self.analysis_mode_var, value="channel").grid(row=2, column=1, sticky="w")
+		ctk.CTkRadioButton(charts_card, text="Dataset", variable=self.analysis_mode_var, value="dataset", text_color="#334155").grid(row=2, column=0, sticky="w", padx=(16, 0))
+		ctk.CTkRadioButton(charts_card, text="Canal", variable=self.analysis_mode_var, value="channel", text_color="#334155").grid(row=2, column=1, sticky="w", padx=(10, 0))
+		self._entry(charts_card, "Etiqueta del foco", self.dashboard_focus_label_var, 3)
+		self._entry(charts_card, "Terminos del foco", self.dashboard_focus_terms_var, 4)
+		ctk.CTkLabel(
+			charts_card,
+			text="Separa terminos con comas. Ejemplo: inmigracion, vacunas, fraude electoral.",
+			text_color="#52606d",
+			wraplength=470,
+		).grid(row=5, column=0, columnspan=3, sticky="w", padx=16, pady=(8, 16))
 
 		ioc_card = self._card(tab, "IOCs de metodos de pago", 0, 1)
 		self.ioc_name_var = tk.StringVar()
 		self.ioc_mode_var = tk.StringVar(value="dataset")
 		self._entry(ioc_card, "Nombre", self.ioc_name_var, 1)
-		ttk.Button(ioc_card, text="Buscar IOCs", command=self._run_iocs).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(ioc_card, text="Buscar IOCs", command=self._run_iocs).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Button(ioc_card, text="Detectar temas", command=self._run_theme_detection).grid(
-			row=2, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(ioc_card, text="Detectar temas", command=self._run_theme_detection).grid(
+			row=2, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
-		ttk.Radiobutton(ioc_card, text="Dataset", variable=self.ioc_mode_var, value="dataset").grid(row=2, column=0, sticky="w")
-		ttk.Radiobutton(ioc_card, text="Canal", variable=self.ioc_mode_var, value="channel").grid(row=2, column=1, sticky="w")
+		ctk.CTkRadioButton(ioc_card, text="Dataset", variable=self.ioc_mode_var, value="dataset", text_color="#334155").grid(row=2, column=0, sticky="w", padx=(16, 0))
+		ctk.CTkRadioButton(ioc_card, text="Canal", variable=self.ioc_mode_var, value="channel", text_color="#334155").grid(row=2, column=1, sticky="w", padx=(10, 0))
 
 		net_card = self._card(tab, "Red de forwards", 1, 0, 2)
 		self.net_dataset_var = tk.StringVar()
 		self._entry(net_card, "Dataset", self.net_dataset_var, 1)
-		ttk.Button(net_card, text="Generar GEXF", command=self._run_net).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(net_card, text="Generar GEXF", command=self._run_net).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 
 	def _build_network_tab(self):
-		tab = ttk.Frame(self.tabs, padding=10)
+		tab = self._add_tab("Canales similares")
 		tab.columnconfigure(0, weight=1)
 		tab.columnconfigure(1, weight=1)
-		self.tabs.add(tab, text="Canales similares")
 
 		sim_card = self._card(tab, "Descubrir canales similares", 0, 0, 2)
 		self.sim_channel_var = tk.StringVar()
@@ -312,8 +362,8 @@ class TrackerApp(tk.Tk):
 		self.sim_depth_var = tk.StringVar(value="1")
 		self.sim_max_var = tk.StringVar()
 		self._entry(sim_card, "Canal semilla", self.sim_channel_var, 1)
-		ttk.Button(sim_card, text="Descubrir", command=self._run_similar).grid(
-			row=1, column=2, sticky="ew", padx=(8, 0), pady=5
+		ctk.CTkButton(sim_card, text="Descubrir", command=self._run_similar).grid(
+			row=1, column=2, sticky="ew", padx=(8, 16), pady=6
 		)
 		self._entry(sim_card, "Dataset salida", self.sim_dataset_var, 2)
 		self._entry(sim_card, "Profundidad", self.sim_depth_var, 3)
@@ -324,7 +374,7 @@ class TrackerApp(tk.Tk):
 			"La red se guarda en dataset/<nombre>/ como CSV, GEXF y GraphML.\n"
 			"Puedes abrir channel_recommendations.gexf en Gephi u otra herramienta de redes."
 		)
-		ttk.Label(guide_card, text=text, style="Card.TLabel", justify="left").grid(row=1, column=0, sticky="w")
+		ctk.CTkLabel(guide_card, text=text, justify="left", text_color="#334155").grid(row=1, column=0, sticky="w", padx=16, pady=(0, 16))
 
 	def _load_config(self):
 		if not CONFIG_PATH.exists():
@@ -386,6 +436,7 @@ class TrackerApp(tk.Tk):
 			self.running_process = subprocess.Popen(
 				args,
 				cwd=ROOT,
+				env={**os.environ, "PYTHONUNBUFFERED": "1"},
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				stdin=subprocess.PIPE,
@@ -520,6 +571,20 @@ class TrackerApp(tk.Tk):
 			args += ["--max-msgs", max_msgs]
 		self._run(args)
 
+	def _run_import_telegram_json(self):
+		json_path = self._require(self.telegram_json_var.get(), "Archivo JSON")
+		channel_link = self._require(self.telegram_json_link_var.get(), "Enlace del canal")
+		if not json_path or not channel_link:
+			return
+		self._run([
+			sys.executable,
+			self._script("import_telegram_json.py"),
+			"--json",
+			json_path,
+			"--channel-link",
+			channel_link,
+		])
+
 	def _run_search(self):
 		dataset_name = self._require(self.search_dataset_var.get(), "Nombre del dataset")
 		terms = self._require(self.search_terms_var.get(), "Terminos")
@@ -550,10 +615,16 @@ class TrackerApp(tk.Tk):
 		name = self._require(self.analysis_name_var.get(), "Nombre")
 		if not name:
 			return
+		args = [sys.executable, self._script("dashboard.py"), name]
 		if self.analysis_mode_var.get() == "channel":
-			self._run([sys.executable, self._script("dashboard.py"), name, "--channel"])
-		else:
-			self._run([sys.executable, self._script("dashboard.py"), name])
+			args.append("--channel")
+		focus_label = self.dashboard_focus_label_var.get().strip()
+		focus_terms = self.dashboard_focus_terms_var.get().strip()
+		if focus_label:
+			args += ["--focus-label", focus_label]
+		if focus_terms:
+			args += ["--focus-terms", focus_terms]
+		self._run(args)
 
 	def _run_iocs(self):
 		name = self._require(self.ioc_name_var.get(), "Nombre")

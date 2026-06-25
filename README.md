@@ -292,6 +292,15 @@ Permite:
 
 Los graficos se generan en formato 1920x1080, con paleta de colores vivos y fuente Century Gothic si esta disponible en el sistema. Incluyen tarjetas KPI, rankings de forwards, timelines, dominios y nube de palabras.
 
+Al generar el dashboard puedes configurar una seccion de **Foco especial**:
+
+- **Etiqueta del foco**: titulo visible, por ejemplo `Desinformacion sanitaria`.
+- **Terminos del foco**: palabras o frases separadas por comas, por ejemplo `vacunas, efectos adversos, pandemia`.
+
+El foco incluye los mensajes que contengan cualquiera de esos terminos. Si los campos se dejan vacios, se conserva el foco judicial predeterminado de versiones anteriores.
+
+La seccion **Temas detectados automaticamente** es independiente del foco. Extrae expresiones frecuentes de dos o tres palabras del contenido real, aplica stopwords multilingues y evita categorias politicas predefinidas. Las tarjetas del foco y de mayor impacto eliminan republicaciones con el mismo contenido.
+
 La funcion **Detectar temas** genera:
 
 ```text
