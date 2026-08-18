@@ -21,7 +21,9 @@ from utils import (
 	get_config_attrs, create_dirs, 
 	write_collected_chats,get_last_download_context,
 	put_last_download_context,store_channels_download,store_channels_related,
-	msgs_dataset_columns,chats_dataset_columns, chats_dataset_dtypes, write_collected_msgs
+	msgs_dataset_columns,chats_dataset_columns, chats_dataset_dtypes, write_collected_msgs,
+	store_msgs_dataset, get_local_staging_dir, copy_tree_to_final,
+	store_to_final, log_operation, backup_local_msgs
 )
 
 
@@ -130,7 +132,18 @@ else:
 	limited_msgs = False
 	max_msgs = 0  # not limitedf
 output = args['output']
-output_folder= f'{output}/{channel}'
+final_output_folder = f'{output}/{channel}'
+# Opt-in via TELEGRAM_TRACKER_LIGHT_DIR. Los mensajes se descargan SIEMPRE a un temporal
+# local (ese temporal ya es la copia local); de ahi se SUBEN directamente al destino
+# final y se VERIFICAN por tamaño. Si OK -> se borra el temporal. Si falla -> se guarda
+# un respaldo durable en TELEGRAM_TRACKER_LIGHT_DIR, se anota en el log y NO se avanza el
+# contexto (para reintentar). Los ficheros pequeños van directos al destino final. Si la
+# variable no existe, los mensajes se escriben directamente en el destino final.
+local_staging = get_local_staging_dir()
+output_folder = final_output_folder
+if local_staging:
+	print(f'> Destino final: {final_output_folder}')
+	print(f'> Respaldo local si falla la subida: {local_staging}')
 # create dirs
 channel_id = create_dirs(output_folder) # If channel exists, returns its ID
 import_source_file = os.path.join(output_folder, 'context', 'import_source.txt')
@@ -182,21 +195,34 @@ print ('')
 
 channel_request = None
 channel_api_source = None
+# Optimizacion (evita rate-limit): si ya tenemos el ID guardado del canal, lo usamos
+# DIRECTAMENTE y NO resolvemos por username (get_entity_attrs). Solo resolvemos por
+# username si el canal es nuevo (sin ID) o si el ID guardado falla (fallback). Asi se
+# ahorra una llamada sensible a flood por cada canal ya conocido (clave al actualizar
+# listas grandes con update_channels / build-dataset).
+force_username = False
+using_direct_id = False
 while True:
 	try:
-		entity_attrs = loop.run_until_complete(
-			get_entity_attrs(client, channel)
-		)
-		# Resolve by username/name first. A bare stored ID often lacks access_hash
-		# and Telethon may treat it as PeerUser instead of PeerChannel.
-		if entity_attrs:
-			channel_id = entity_attrs.id
-			channel_api_source = entity_attrs
-		elif channel_id is not None:
-			channel_api_source = channel_id
-		else:
-			logging.error (f'{datetime.now()},Error,{channel}, ID not found')
-			break
+		if channel_api_source is None:
+			if channel_id is not None and not force_username:
+				# ID guardado -> usarlo directo, sin resolver por username
+				channel_api_source = channel_id
+				using_direct_id = True
+			else:
+				# canal nuevo, o el ID guardado fallo -> resolver por username
+				using_direct_id = False
+				entity_attrs = loop.run_until_complete(
+					get_entity_attrs(client, channel)
+				)
+				# A bare stored ID often lacks access_hash and Telethon may treat it
+				# as PeerUser instead of PeerChannel.
+				if entity_attrs:
+					channel_id = entity_attrs.id
+					channel_api_source = entity_attrs
+				else:
+					logging.error (f'{datetime.now()},Error,{channel}, ID not found')
+					break
 		# Collect Source -> GetFullChannelRequest
 		channel_request = loop.run_until_complete(
 			full_channel_req(client, channel_api_source)
@@ -204,13 +230,21 @@ while True:
 		print('Get entity attribs')
 		break
 	except errors.FloodWaitError as e:
-		# e.seconds contiene el número de segundos que debes 
+		# e.seconds contiene el número de segundos que debes
 		print(f'ratelimit at {datetime.now()}')
 		hours, remainder = divmod(e.seconds, 3600)
 		minutes, seconds = divmod(remainder, 60)
 		print(f'Flood wait for {e.seconds} seconds ({hours} hours, {minutes} minutes y {seconds} seconds)')
 		time.sleep (e.seconds)
 	except Exception as e:
+		# Si fallo usando el ID guardado directamente, reintentar resolviendo por
+		# username (el ID pelado no traia access_hash / Telethon lo tomo por PeerUser).
+		if using_direct_id:
+			print(f'> El ID guardado fallo para {channel}; reintento por username.')
+			force_username = True
+			channel_api_source = None
+			using_direct_id = False
+			continue
 		print (f'¡¡¡ An exception has happened, ruled out {channel} {str(e)}!!!\n')
 		print(str(e), file=sys.stderr)
 		logging.error (f'{datetime.now()},Exception ,{channel}, {str(e)}')
@@ -248,7 +282,7 @@ if channel_request != None:
 
 	'''
 	# collect messages
-	msgs_path = f'{output_folder}/msgs_dataset.csv'
+	msgs_path = f'{output_folder}/msgs_dataset.csv'  # destino final de los mensajes
 	
 	last_msg = start_msg
 	num_msgs = 0
@@ -438,27 +472,51 @@ df.to_csv(
 store msgs in csv
  '''
  # merge dataframe
+op_log_path = f'{output_folder}/context/operations_log.csv'
 if 'msgs_tmp' in globals():
-	if os.name == 'nt':
-		append = 'type'
-	else:
-		append = 'cat'
 	print (f'stored channel messages {channel}')
-	# Put head to msgs_path if not exit
-	if not os.path.exists(msgs_path):
-		df = pd.DataFrame(columns = msgs_dataset_columns())
-		df.to_csv(
-			msgs_path,
-			mode='w', 
-			index=False,
-			encoding='utf-8'
-			)
-	path_msgs_nor = os.path.normpath(msgs_path)
-	path_tmp_nor = os.path.normpath(msgs_tmp.name)
-	print(f'{append} {path_tmp_nor} >> {path_msgs_nor}')
-	os.system(f'{append} {path_tmp_nor} >> {path_msgs_nor}')
 	msgs_tmp.close()
-	os.remove(msgs_tmp.name)
+	if local_staging:
+		# El temporal ya es la copia local: se SUBE directo al destino final y se
+		# verifica por tamaño. Si OK -> se borra el temporal. Si falla -> respaldo
+		# durable en TELEGRAM_TRACKER_LIGHT_DIR, se anota el motivo en el log y NO se
+		# avanza el contexto (sys.exit) para poder reintentar.
+		try:
+			op_final = store_to_final(msgs_path, msgs_tmp.name, msgs_dataset_columns())
+			log_operation(op_log_path, 'destino_final', op_final, msgs_path)
+			print(f'> [{op_final}] mensajes subidos y verificados: {msgs_path}')
+			os.remove(msgs_tmp.name)
+		except Exception as e:
+			rel = os.path.splitdrive(os.path.normpath(final_output_folder))[1].lstrip('\\/')
+			backup_path = os.path.join(local_staging, rel, 'msgs_dataset.csv')
+			try:
+				backup = backup_local_msgs(msgs_tmp.name, backup_path, msgs_dataset_columns())
+			except Exception as be:
+				backup = f'{msgs_tmp.name} (no se pudo mover al respaldo: {be})'
+			print(f'!!! ERROR subiendo mensajes de {channel} a {msgs_path}: {e}', file=sys.stderr)
+			print(f'!!! Respaldo local: {backup}', file=sys.stderr)
+			print(f'!!! Contexto NO actualizado: se puede reintentar.', file=sys.stderr)
+			try:
+				log_operation(op_log_path, 'destino_final', 'ERROR subida (respaldo local, contexto NO avanzado)', str(e))
+			except Exception:
+				pass
+			logging.error(f'{datetime.now()},UploadError,{channel},{str(e)} | respaldo={backup}')
+			sys.exit(1)
+	else:
+		# Sin nube: los mensajes se escriben directamente en el destino (copia/anexa).
+		msgs_existed = os.path.exists(msgs_path)
+		try:
+			store_msgs_dataset(msgs_tmp.name, msgs_path, msgs_dataset_columns())
+		except Exception as e:
+			print(f'!!! Error guardando mensajes en {msgs_path}: {e}', file=sys.stderr)
+			print(f'!!! Los mensajes descargados quedan en {msgs_tmp.name}', file=sys.stderr)
+			print(f'!!! Contexto NO actualizado: el canal se puede volver a descargar.', file=sys.stderr)
+			logging.error(f'{datetime.now()},StoreError,{channel},{str(e)}')
+			sys.exit(1)
+		op_local = 'anexado' if msgs_existed else 'copia (primera descarga)'
+		log_operation(op_log_path, 'local', op_local, msgs_path)
+		print(f'> [{op_local}] mensajes en destino: {msgs_path}')
+		os.remove(msgs_tmp.name)
 '''
 Save downloaded context
 '''
@@ -469,13 +527,13 @@ put_last_download_context(f'{output_folder}/context/{channel}_log.csv',time.ctim
 Save collected_channel
 '''
 
-store_channels_download(f'./{output_folder}/context/collected_channel_log.csv',channel,output_folder)
+store_channels_download(f'{output_folder}/context/collected_channel_log.csv',channel,output_folder)
 # log results
 
 '''
 Save related_channel
 '''
-store_channels_related(f'./{output_folder}/context/related_channel_log.csv',users_names,output_folder)
+store_channels_related(f'{output_folder}/context/related_channel_log.csv',users_names,output_folder)
 
 # log results
 text = f'End program at {time.ctime()}'

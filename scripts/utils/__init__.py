@@ -6,6 +6,8 @@ import asyncio
 import os
 import re
 import sys
+import shutil
+import tempfile
 from pathlib import Path
 
 # import submodules
@@ -804,12 +806,255 @@ def write_collected_msgs (messages, username, chats, msg_tmp):
 
 	df_msgs.to_csv(
 		msg_tmp,
-		mode='a', 
+		mode='a',
 		header=False,
 		index=False,
 		encoding='utf-8'
 	)
 	return
+
+
+def store_msgs_dataset(tmp_path, dest_path, header_columns, chunk_size=1024 * 1024):
+	'''
+	Guarda los mensajes recien descargados (tmp_path, ya escrito en disco local
+	durante la captura) en el CSV definitivo (dest_path).
+
+	- Actualizacion (el destino YA existe): se ANEXAN al final solo los mensajes
+	  nuevos, por bloques. NO se relee el contenido previo, asi que actualizar un
+	  canal de un millon de mensajes con 10 nuevos escribe unicamente esos 10.
+	  Si el anexado falla a medias, se recorta el fichero a su tamano original
+	  (rollback) para no dejarlo corrupto.
+
+	- Primera descarga (el destino NO existe): se ensambla en LOCAL (cabecera +
+	  mensajes) y se MUEVE al destino mediante un '<dest>.part' contiguo +
+	  reemplazo atomico, para que el fichero solo aparezca cuando esta completo.
+
+	Sustituye al 'type tmp >> file' (os.system) que fallaba con
+	ERROR_NO_SYSTEM_RESOURCES (1450) al volcar de golpe ficheros grandes sobre
+	unidades sincronizadas o virtuales (Google Drive, Dropbox...); las escrituras
+	por bloques + fsync si las toleran.
+
+	Cualquier fallo lanza excepcion: el llamador NO debe avanzar el contexto de
+	descarga (evita perdida silenciosa de mensajes).
+	'''
+	tmp_path = os.fspath(tmp_path)
+	dest_path = os.fspath(dest_path)
+
+	if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
+		# --- Actualizacion: anexar solo los mensajes nuevos ---
+		original_size = os.path.getsize(dest_path)
+		try:
+			with open(tmp_path, 'rb') as src, open(dest_path, 'ab') as dst:
+				shutil.copyfileobj(src, dst, chunk_size)
+				dst.flush()
+				os.fsync(dst.fileno())
+		except Exception:
+			# rollback: deshacer un anexado parcial
+			try:
+				with open(dest_path, 'ab') as dst:
+					dst.truncate(original_size)
+			except OSError:
+				pass
+			raise
+	else:
+		# --- Primera descarga: ensamblar en local y mover al destino ---
+		fd, staging_path = tempfile.mkstemp(suffix='.csv', prefix='msgs_stage_')
+		os.close(fd)
+		dest_tmp = dest_path + '.part'
+		try:
+			# ensamblar cabecera + mensajes en el disco local
+			with open(staging_path, 'wb') as out:
+				out.write((','.join(header_columns) + '\n').encode('utf-8'))
+				with open(tmp_path, 'rb') as src:
+					shutil.copyfileobj(src, out, chunk_size)
+				out.flush()
+				os.fsync(out.fileno())
+			expected_size = os.path.getsize(staging_path)
+			# mover: copia por bloques a un .part contiguo + reemplazo atomico
+			with open(staging_path, 'rb') as src, open(dest_tmp, 'wb') as dst:
+				shutil.copyfileobj(src, dst, chunk_size)
+				dst.flush()
+				os.fsync(dst.fileno())
+			written = os.path.getsize(dest_tmp)
+			if written != expected_size:
+				raise IOError(
+					f'Escritura incompleta en {dest_tmp}: '
+					f'{written} de {expected_size} bytes'
+				)
+			os.replace(dest_tmp, dest_path)
+		finally:
+			for leftover in (staging_path, dest_tmp):
+				try:
+					if os.path.exists(leftover):
+						os.remove(leftover)
+				except OSError:
+					pass
+
+
+def get_local_staging_dir():
+	'''
+	Directorio LOCAL de trabajo, tomado de la variable de entorno
+	`TELEGRAM_TRACKER_LIGHT_DIR`.
+
+	- Si la variable existe (y no esta vacia): la app descarga/actualiza en ese
+	  directorio local (disco real, duradero) y al terminar copia el dataset al
+	  destino final (p.ej. el symlink `data/` a Google Drive).
+	- Si NO existe: devuelve None y la app escribe directamente en el destino
+	  final, como siempre. Quien no guarde en la nube no tiene que hacer nada.
+	'''
+	d = os.environ.get('TELEGRAM_TRACKER_LIGHT_DIR', '').strip()
+	return d or None
+
+
+def _copy_file_atomic(src, dst, chunk_size=1024 * 1024):
+	'''Copia un fichero por bloques a un '<dst>.part' y hace reemplazo atomico
+	(os.replace). El destino solo aparece cuando esta completo.'''
+	src = os.fspath(src)
+	dst = os.fspath(dst)
+	dst_tmp = dst + '.part'
+	try:
+		with open(src, 'rb') as fsrc, open(dst_tmp, 'wb') as fdst:
+			shutil.copyfileobj(fsrc, fdst, chunk_size)
+			fdst.flush()
+			os.fsync(fdst.fileno())
+		os.replace(dst_tmp, dst)
+	except Exception:
+		try:
+			if os.path.exists(dst_tmp):
+				os.remove(dst_tmp)
+		except OSError:
+			pass
+		raise
+
+
+def _append_file(src, dst, chunk_size=1024 * 1024):
+	'''Anexa el contenido de src al final de dst, por bloques. Si falla a mitad,
+	recorta dst a su tamano original (rollback) para no dejarlo corrupto.'''
+	src = os.fspath(src)
+	dst = os.fspath(dst)
+	original_size = os.path.getsize(dst)
+	try:
+		with open(src, 'rb') as fsrc, open(dst, 'ab') as fdst:
+			shutil.copyfileobj(fsrc, fdst, chunk_size)
+			fdst.flush()
+			os.fsync(fdst.fileno())
+	except Exception:
+		try:
+			with open(dst, 'ab') as fdst:
+				fdst.truncate(original_size)
+		except OSError:
+			pass
+		raise
+
+
+def store_to_final(final_msgs_path, delta_path, header_columns, chunk_size=1024 * 1024):
+	'''
+	Sube los mensajes descargados (`delta_path` = el temporal local de la descarga)
+	al fichero de mensajes del destino final, VERIFICANDO por tamaño (lanza
+	excepcion si no cuadra, para que el llamador guarde un respaldo local):
+	  - destino NO existe -> escribe CABECERA + delta en `<destino>.part`, verifica
+	    tamaño == len(cabecera)+tamaño(delta) y hace reemplazo atomico. -> 'copia'.
+	  - destino SI existe -> ANEXA el delta, verifica tamaño == previo+tamaño(delta)
+	    (rollback por truncate si no cuadra). -> 'anexado'.
+	No usa ninguna copia local intermedia: el temporal de la descarga ya es la copia
+	local; de ahi va directo al destino.
+	'''
+	final_msgs_path = os.fspath(final_msgs_path)
+	delta_path = os.fspath(delta_path)
+	delta_size = os.path.getsize(delta_path)
+	if os.path.exists(final_msgs_path):
+		before = os.path.getsize(final_msgs_path)
+		_append_file(delta_path, final_msgs_path, chunk_size)  # rollback interno si peta
+		after = os.path.getsize(final_msgs_path)
+		if after != before + delta_size:
+			try:
+				with open(final_msgs_path, 'ab') as f:
+					f.truncate(before)  # rollback si el tamaño no cuadra
+			except OSError:
+				pass
+			raise IOError(
+				f'Verificacion de tamaño fallida al anexar en {final_msgs_path}: '
+				f'{after} != {before}+{delta_size}'
+			)
+		return 'anexado'
+	# primera vez: cabecera + delta -> .part -> reemplazo atomico
+	os.makedirs(os.path.dirname(final_msgs_path), exist_ok=True)
+	header = (','.join(header_columns) + '\n').encode('utf-8')
+	dest_tmp = final_msgs_path + '.part'
+	try:
+		with open(dest_tmp, 'wb') as out:
+			out.write(header)
+			with open(delta_path, 'rb') as src:
+				shutil.copyfileobj(src, out, chunk_size)
+			out.flush()
+			os.fsync(out.fileno())
+		expected = len(header) + delta_size
+		got = os.path.getsize(dest_tmp)
+		if got != expected:
+			raise IOError(
+				f'Verificacion de tamaño fallida al copiar a {final_msgs_path}: '
+				f'{got} != {expected}'
+			)
+		os.replace(dest_tmp, final_msgs_path)
+	except Exception:
+		try:
+			if os.path.exists(dest_tmp):
+				os.remove(dest_tmp)
+		except OSError:
+			pass
+		raise
+	return 'copia'
+
+
+def backup_local_msgs(tmp_path, backup_path, header_columns, chunk_size=1024 * 1024):
+	'''
+	Guarda una copia LOCAL durable (cabecera + mensajes descargados) en `backup_path`
+	cuando la subida al destino final falla. Asi el temporal no se pierde y se puede
+	recuperar/reintentar. Devuelve la ruta del respaldo.
+	'''
+	tmp_path = os.fspath(tmp_path)
+	backup_path = os.fspath(backup_path)
+	os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+	header = (','.join(header_columns) + '\n').encode('utf-8')
+	with open(backup_path, 'wb') as out:
+		out.write(header)
+		with open(tmp_path, 'rb') as src:
+			shutil.copyfileobj(src, out, chunk_size)
+		out.flush()
+		os.fsync(out.fileno())
+	return backup_path
+
+
+def copy_tree_to_final(src_dir, dst_dir, exclude=None, chunk_size=1024 * 1024):
+	'''
+	Copia recursivamente `src_dir` al destino final `dst_dir` (fichero a fichero,
+	por bloques y con reemplazo atomico). `exclude` = nombres de fichero a saltar
+	(p.ej. `msgs_dataset.csv`, que se gestiona aparte con `store_to_final`). No
+	borra lo que ya hubiera en el destino. Lanza excepcion si algo falla.
+	'''
+	exclude = exclude or set()
+	src_dir = os.fspath(src_dir)
+	dst_dir = os.fspath(dst_dir)
+	for root, dirs, files in os.walk(src_dir):
+		rel = os.path.relpath(root, src_dir)
+		target_root = dst_dir if rel == '.' else os.path.join(dst_dir, rel)
+		os.makedirs(target_root, exist_ok=True)
+		for name in files:
+			if name.endswith('.part') or name in exclude:
+				continue
+			_copy_file_atomic(os.path.join(root, name), os.path.join(target_root, name), chunk_size)
+
+
+def log_operation(log_path, scope, operation, detail=''):
+	'''Anota una operacion en un log CSV (context/operations_log.csv):
+	time, scope (local|destino_final), operation (copia|anexado|...), detail.'''
+	log_path = os.fspath(log_path)
+	os.makedirs(os.path.dirname(log_path), exist_ok=True)
+	is_new = not os.path.exists(log_path)
+	with open(log_path, 'a', encoding='utf-8') as f:
+		if is_new:
+			f.write('time,scope,operation,detail\n')
+		f.write(f'{datetime.now()},{scope},{operation},{detail}\n')
 
 
 '''

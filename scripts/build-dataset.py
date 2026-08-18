@@ -131,7 +131,11 @@ else:
 			except subprocess.CalledProcessError as e:
 				# subprocess.run always return error. The result is stored in the error log if stderr is an empty string
 				if e.stderr != '':
-					logging.error (f'{datetime.now()},Exception , {channel}, {e.stderr}') 
+					logging.error (f'{datetime.now()},Exception , {channel}, {e.stderr}')
+				# Registro en el log del dataset: main.py fallo (p.ej. subida al destino
+				# final fallida y contexto NO avanzado -> respaldo local en el canal).
+				f_log.write(f'{channel},download_error,{datetime.now()}' + chr(10))
+				f_log.flush()
 			#Read msgs CSV file 
 			try:
 				if os.path.exists(f'{data_path}/{channel}/collected_chats.csv'):
@@ -168,6 +172,11 @@ else:
 						index=False)
 					f_log.write(f'{channel},downloaded,{datetime.now()}\n')
 					f_log.flush()
+				else:
+					print(f'----> Sin datos para {channel}: no existe {data_path}/{channel}/collected_chats.csv')
+					f_log.write(f'{channel},sin_datos,{datetime.now()}' + chr(10))
+					f_log.flush()
+					logging.error(f'{datetime.now()},SinDatos,{channel},no se encontro {data_path}/{channel}/collected_chats.csv')
 				i += 1
 			except KeyboardInterrupt:
 				print ('\nGoodbye!')
@@ -176,6 +185,8 @@ else:
 				print('paso-4')
 				print (f'\n¡¡¡ An exception has happened, ruled out {channel}!!!')
 				logging.error (f'{datetime.now()},Exception , {channel}, {str(e)}') 
+				f_log.write(f'{channel},error,{datetime.now()}' + chr(10))
+				f_log.flush()
 				i += 1
 	f_log.close()
 	'''
