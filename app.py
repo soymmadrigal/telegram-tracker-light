@@ -31,6 +31,13 @@ class TrackerApp(ctk.CTk):
 		self.minsize(1240, 800)
 		self.output_queue = queue.Queue()
 		self.running_process = None
+		# Guardia SINCRONA contra doble lanzamiento: se marca en _run (hilo de la
+		# GUI) antes de arrancar el worker, para que un segundo clic no cuele un
+		# segundo proceso. (running_process se asigna despues, dentro del hilo.)
+		self._process_active = False
+		# Estado para pintar las barras de progreso (tqdm usa '\r') en una sola
+		# linea de la consola en vez de acumular una linea por refresco.
+		self._progress_active = False
 		self._build_layout()
 		self._load_config()
 		self._poll_output()
@@ -422,10 +429,31 @@ class TrackerApp(ctk.CTk):
 	def _script(self, name):
 		return str(SCRIPTS_DIR / name)
 
+	def _set_launch_buttons_enabled(self, enabled):
+		# Deshabilita (gris) los botones de lanzamiento mientras corre un proceso;
+		# deja activos los de interaccion (Detener, Enviar, Enviar codigo, Limpiar).
+		keep = {"Detener", "Enviar", "Enviar codigo", "Limpiar"}
+		state = "normal" if enabled else "disabled"
+		def walk(widget):
+			for child in widget.winfo_children():
+				if isinstance(child, ctk.CTkButton):
+					try:
+						if child.cget("text") not in keep:
+							child.configure(state=state)
+					except Exception:
+						pass
+				walk(child)
+		walk(self)
+
 	def _run(self, args):
-		if self.running_process is not None:
+		if self._process_active:
 			messagebox.showwarning("Proceso en marcha", "Ya hay un proceso ejecutandose.")
 			return
+		# Marca ocupado YA, en el hilo de la GUI, antes de arrancar el worker.
+		# Tkinter procesa los clics de uno en uno, asi que un segundo clic vera
+		# esto puesto y se rechazara (no se lanza un segundo proceso).
+		self._process_active = True
+		self._set_launch_buttons_enabled(False)   # botones en gris hasta que termine
 		self._append_console("> " + " ".join(args) + "\n")
 		self.status_var.set("Ejecutando...")
 		thread = threading.Thread(target=self._run_worker, args=(args,), daemon=True)
@@ -445,6 +473,14 @@ class TrackerApp(ctk.CTk):
 				errors="replace",
 				creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
 			)
+			# Preservar el '\r' (retorno de carro) de las barras de progreso: sin
+			# esto, el modo universal-newlines lo convierte en '\n' y cada refresco
+			# de tqdm aparece como una linea nueva. Con newline='' se conserva y
+			# _append_console puede reescribir la linea en su sitio.
+			try:
+				self.running_process.stdout.reconfigure(newline="")
+			except Exception:
+				pass
 			for line in self.running_process.stdout:
 				self.output_queue.put(line)
 			code = self.running_process.wait()
@@ -453,6 +489,7 @@ class TrackerApp(ctk.CTk):
 			self.output_queue.put(f"\n[Error: {exc}]\n")
 		finally:
 			self.running_process = None
+			self._process_active = False   # libera la guardia (final normal, error o crash)
 			self.output_queue.put(("STATUS", "Listo"))
 
 	def _poll_output(self):
@@ -461,6 +498,8 @@ class TrackerApp(ctk.CTk):
 				item = self.output_queue.get_nowait()
 				if isinstance(item, tuple) and item[0] == "STATUS":
 					self.status_var.set(item[1])
+					if item[1] == "Listo":
+						self._set_launch_buttons_enabled(True)   # rehabilita al terminar
 				else:
 					self._append_console(item)
 		except queue.Empty:
@@ -468,7 +507,34 @@ class TrackerApp(ctk.CTk):
 		self.after(120, self._poll_output)
 
 	def _append_console(self, text):
-		self.console.insert(tk.END, text)
+		if not text:
+			return
+		# Maneja el retorno de carro '\r' de las barras de progreso (tqdm) para que se
+		# actualicen en la MISMA linea. Clave: trata '\r\n' (fin de linea en Windows y
+		# el refresco final del close() de tqdm) como "reescribe la linea y cierrala",
+		# no como linea nueva. Antes solo miraba '\r', y el cierre de la barra (que
+		# acaba en '\r\n') se colaba como una segunda linea -> aparecian dos barras.
+		if text.endswith("\r\n"):
+			body, commit = text[:-2], True
+		elif text.endswith("\n"):
+			body, commit = text[:-1], True
+		elif text.endswith("\r"):
+			body, commit = text[:-1], False
+		else:
+			body, commit = text, False
+		# Si el cuerpo trae '\r' internos, solo vale lo que hay tras el ultimo (la
+		# barra se reescribe desde el principio de la linea).
+		if "\r" in body:
+			body = body.rsplit("\r", 1)[-1]
+		# Si venimos pintando una barra, reescribe la linea actual; si no, es normal.
+		if self._progress_active:
+			self.console.delete("end-1c linestart", "end-1c")
+		self.console.insert("end-1c", body)
+		if commit:
+			self.console.insert("end-1c", "\n")
+			self._progress_active = False
+		else:
+			self._progress_active = True
 		self.console.see(tk.END)
 
 	def _clear_console(self):
